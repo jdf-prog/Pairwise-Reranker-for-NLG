@@ -1,0 +1,7 @@
+numpy
+transformers
+tensorboard
+nltk
+rouge_score
+torchmetrics
+wandb
