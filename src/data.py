@@ -81,13 +81,20 @@ class DualCollator(object):
         target_ids = target["input_ids"]
         target_mask = target["attention_mask"].bool()
         target_ids = target_ids.masked_fill(~target_mask, -100)
-        text_candidates = [[example['source']] + example['candidates'] for example in batch]
-        candidate_ids, candidate_masks = encode_candidates(text_candidates,
+        context_texts = [[example['source']] + example['candidates'] for example in batch]
+        context_ids, context_masks = encode_candidates(context_texts,
                                                      self.tokenizer,
                                                      self.text_maxlength)
-        scores = torch.stack([example['scores'] for example in batch], dim=0)
 
-        return (index, target_ids, target_mask, candidate_ids, candidate_masks, scores)
+        scores = torch.stack([
+            [
+                list(candidate['scores'].values())
+                for candidate in example['candidates']
+            ]
+            for example in batch
+        ], dim=0)
+
+        return (index, target_ids, target_mask, context_ids, context_masks, scores)
 
 class Collator(object):
     def __init__(self, text_maxlength, tokenizer, answer_maxlength=20):

@@ -5,3 +5,4 @@ nltk
 rouge_score
 torchmetrics
 wandb
+apex

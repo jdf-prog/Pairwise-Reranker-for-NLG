@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader, SequentialSampler
 from torchmetrics.text.rouge import ROUGEScore
 from tqdm import tqdm
 
-import src.slurm
 import src.util
 from src.options import Options
 import src.data
