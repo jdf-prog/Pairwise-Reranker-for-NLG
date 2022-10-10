@@ -51,6 +51,7 @@ class DualEncoderWrapper(torch.nn.Module):
         self.n_tasks = n_tasks
         self.d_model = d_model
         self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
+        self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
 
     def reduce_padding(self, input_ids, attention_mask):
         """
@@ -262,11 +263,7 @@ class ModelMultitaskRegression(nn.Module):
         return x
 
 
-
-
-
-
-class ModelMultitaskBinary(nn.Module):
+class MoERegression(nn.Module):
     """
         This class is modified from the original implementation of the paper:
         SummaReranker: A Multi-Task Mixture-of-Experts Re-ranking Framework for Abstractive Summarization
@@ -280,9 +277,8 @@ class ModelMultitaskBinary(nn.Module):
         We don't use this layer for any prediction.
     """
 
-    def __init__(self, device, n_tasks, input_size, hidden_size, num_experts=6, expert_hidden_size=1024, k=3, tower_hidden_size=1024):
-        super(ModelMultitaskBinary, self).__init__()
-        self.device = device
+    def __init__(self, n_tasks, input_size, hidden_size, num_experts=6, expert_hidden_size=1024, k=4, tower_hidden_size=1024):
+        super(MoERegression, self).__init__()
         self.n_tasks = n_tasks
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -295,186 +291,27 @@ class ModelMultitaskBinary(nn.Module):
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         # MoE
-        self.moe = MoE(device, n_tasks, hidden_size, hidden_size, num_experts, expert_hidden_size, k)
+        self.moe = MoE(n_tasks, hidden_size, hidden_size, num_experts, expert_hidden_size, k)
         # towers - one for each task
-        self.towers = nn.ModuleList([MLPTower(hidden_size, tower_hidden_size) for i in range(n_tasks)])
+        self.towers = nn.ModuleList([MLPTower(hidden_size) for _ in range(n_tasks)])
         self.sigmoid = nn.Sigmoid()
 
-        self.loss = nn.BCEWithLogitsLoss()
 
-        # sampled candidates
-        self.selected_idx = []
-
-        # training labels
-        self.original_training_labels = {}
-        self.training_labels = {}
-        self.training_scores = {}
-        self.training_hits = {}
-        for j in range(n_tasks):
-            self.original_training_labels[j] = []
-            self.training_labels[j] = []
-            self.training_scores[j] = []
-            self.training_hits[j] = []
-
-        # multi-summary evaluation
-        self.multi_summary_pred_idx = {}
-        self.multi_summary_preds = {}
-        for j in range(n_tasks):
-            self.multi_summary_pred_idx[j] = []
-            self.multi_summary_preds[j] = []
-
-    def display_selected_idx(self):
-        print("\nStatistics on sampled candidates:")
-        n_methods = len(self.args.generation_methods)
-        selected_methods = {}
-        for i in range(len(self.selected_idx)):
-            idx = self.selected_idx[i]
-            method = int(idx / self.args.num_beams)
-            if not(method in selected_methods.keys()):
-                selected_methods[method] = 0
-            selected_methods[method] += 1
-        for method in selected_methods.keys():
-            print("Generation method {}, # selected candidates: {} ({:.4f}%)".format(
-                method, selected_methods[method], 100 * selected_methods[method] / len(self.selected_idx)
-            ))
-
-    def display_training_labels(self):
-        print("\nStatistics on training labels:")
-        for j in range(self.args.n_tasks):
-            s_ori_pos_j = np.sum(self.original_training_labels[j])
-            s_pos_j = np.sum(self.training_labels[j])
-            m_pos_j = 100 * np.mean(self.training_labels[j]) / (self.args.n_positives + self.args.n_negatives)
-            m_label_j = np.mean(self.training_scores[j])
-            m_hits_j = 100 * np.mean(self.training_hits[j])
-            s_hits_j = np.sum(self.training_hits[j])
-            print("Task {}, # original pos: {} / {} batches // # pos: {} / {} batches, % pos: {:.4f} // mean of training label: {:.4f} // % hitting the max: {:.4f}, count: {} / {}".format(
-                j, s_ori_pos_j, len(self.training_labels[j]),  s_pos_j, len(self.training_labels[j]), m_pos_j, m_label_j, m_hits_j, s_hits_j, len(self.training_hits[j])
-            ))
-
-    def display_multi_summary_predictions(self):
-        print("\nMulti-summary evaluation:")
-        all_ms = []
-        for j in range(self.args.n_tasks):
-            self.multi_summary_pred_idx[j] = np.array(self.multi_summary_pred_idx[j])
-            self.multi_summary_preds[j] = np.array(self.multi_summary_preds[j])
-            m_j = np.mean(self.multi_summary_preds[j])
-            all_ms.append(m_j)
-            print("Task {}, prediction is {:.4f}".format(j, m_j))
-        print("Mean over tasks: {:.4f}".format(np.mean(all_ms)))
-        intersections = []
-        correlations = []
-        for j in range(self.args.n_tasks):
-            for k in range(self.args.n_tasks):
-                if k != j:
-                    intersect = 100 * np.mean(self.multi_summary_pred_idx[j] == self.multi_summary_pred_idx[k])
-                    intersections.append(intersect)
-                    corr, p = pearsonr(self.multi_summary_pred_idx[j], self.multi_summary_pred_idx[k])
-                    correlations.append(corr)
-        m_intersection = np.mean(intersections)
-        m_corr = np.mean(correlations)
-        print("Mean intersection between pairs of pred idx: {:.4f}, mean Pearson correlation: {:.4f}".format(m_intersection, m_corr))
-
-    def forward(self, cls_embed, scores, train=True):
-        bzs, n_candidate, d_input = cls_embed.shape
-        d_model = d_input // 2
-        loss = torch.tensor(0.0).to(cls_embed.device)
-        total_predictions_idx = []
-        overall_sums = []
-        overall_predictions = []
+    def forward(self, x):
+        _, n_candidate, _ = x.size()
+        pred_scores = []
         for i in range(n_candidate):
-            # labels construction
-            scores_i = scores[i]
-            original_scores_i = scores_i.clone().detach()
-            labels_i = torch.zeros(scores_i.shape, device = cls_embed.device)
+            encs = x[:, i, :] # [CLS]
+            preds_i = self.fc2(self.relu(self.fc1(encs))) # shared bottom
+            train = self.training
+            preds_i, _ = self.moe(preds_i, train = train, collect_gates = not(train))
+            pred_scores_i = []
             for j in range(self.n_tasks):
-                best_j = scores_i[j].max()
-                if self.args.sharp_pos:
-                    if best_j > scores_i[j].min():
-                        labels_i[j][scores_i[j] == best_j] = 1
-                else:
-                    labels_i[j][scores_i[j] == best_j] = 1
-            original_labels_i = labels_i.clone().detach()
-            # model output
-            encs = encs[:, i, :] # [CLS]
-            # shared bottom
-            if self.args.use_shared_bottom:
-                preds_i = self.fc2(self.relu(self.fc1(encs)))
-            else:
-                preds_i = encs
-            # MoE
-            preds_i, aux_loss_i = self.moe(preds_i, train = train, collect_gates = not(train))
-
-            loss_i = torch.tensor(0.0).to(cls_embed.device)
-            total_predictions = np.zeros(len(preds_i[0]))
-            for j in range(self.n_tasks):
-
                 # pred
                 preds_i_j = self.towers[j](preds_i[j])[:, 0]
-
-                # labels
-                labels_i_j = labels_i[j]
-                if torch.sum(mode) > 0: # train
-                    self.original_training_labels[j].append(original_labels_i[j].sum().item())
-                    self.training_labels[j].append(labels_i_j.sum().item())
-                    if labels_i_j.sum() > 0:
-                        self.training_scores[j].append(scores_i[j][labels_i_j == 1].mean().item())
-                    self.training_hits[j].append(int(scores_i[j].max().item() == original_scores_i[j].max().item()))
-
-                # loss
-                loss_i_j = self.loss(preds_i_j, labels_i_j)
-                loss_i = loss_i + loss_i_j
-
-                # predictions
-                preds_i_j = self.sigmoid(preds_i_j).detach().cpu().numpy()
-                prediction_idx = np.argmax(preds_i_j)
-                predictions_idx[j].append(prediction_idx)
-                prediction = scores_i[j][prediction_idx].item()
-                predictions[j].append(prediction)
-                total_predictions += preds_i_j
-
-                # accuracy
-                pos_idx = scores_i[j].argmax().item()
-                accuracy_i_j = 100 * int(scores_i[j][prediction_idx].item() == scores_i[j][pos_idx].item())
-                accuracy[j] = accuracy[j] + accuracy_i_j
-
-                # ranks
-                ranks = rank_array(preds_i_j)
-                all_pos_idx = [k for k in range(len(scores_i[j])) if scores_i[j][k].item() == scores_i[j][pos_idx].item()]
-                rank_i_j = np.min(ranks[all_pos_idx])
-                rank[j] = rank[j] + rank_i_j
-            loss_i = loss_i / self.args.n_tasks
-            if self.args.use_aux_loss:
-                loss_i = loss_i + aux_loss_i
-            loss = loss + loss_i
-            total_predictions /= self.args.n_tasks
-            total_prediction_idx = np.argmax(total_predictions)
-            total_predictions_idx.append(total_prediction_idx)
-            overall_sum = sum([scores_i[j][total_prediction_idx].item() for j in range(self.args.n_tasks)])
-            overall_sums.append(overall_sum)
-            overall_predictions.append(total_predictions)
-
-        loss /= scores.shape[0]
-        outputs = {
-            "loss": loss,
-            "loss_nce": loss,
-            "total_predictions_idx": total_predictions_idx,
-            "overall_predictions": overall_predictions
-        }
-        prediction_sum = 0
-        for j in range(self.args.n_tasks):
-            accuracy[j] /= scores.shape[0]
-            outputs["accuracy_{}".format(self.args.scoring_methods[j])] = torch.tensor(accuracy[j]).float().to(loss.device)
-            rank[j] /= scores.shape[0]
-            outputs["rank_{}".format(self.args.scoring_methods[j])] = torch.tensor(rank[j]).float().to(loss.device)
-            if torch.sum(mode) == 0:
-                self.multi_summary_pred_idx[j] += predictions_idx[j]
-                self.multi_summary_preds[j] += predictions[j]
-            predictions[j] = np.mean(predictions[j])
-            outputs["prediction_{}".format(self.args.scoring_methods[j])] = torch.tensor(predictions[j]).float().to(loss.device)
-            prediction_sum += predictions[j]
-        outputs["prediction_sum"] = torch.tensor(prediction_sum).float().to(loss.device)
-        outputs["overall_sum"] = torch.tensor(np.mean(overall_sums)).float().to(loss.device)
-
-        return outputs
-
-
+                pred_scors_i_j = self.sigmoid(preds_i_j)
+                pred_scores_i.append(pred_scors_i_j)
+            pred_scores_i = torch.stack(pred_scores_i, dim=1)
+            pred_scores.append(pred_scores_i)
+        pred_scores = torch.stack(pred_scores, dim=1)
+        return pred_scores

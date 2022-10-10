@@ -20,9 +20,8 @@ class MoE(nn.Module):
     k: an integer - how many experts to use for each batch element
     """
 
-    def __init__(self, device, n_tasks, input_size, output_size, num_experts, hidden_size, k=4):
+    def __init__(self, n_tasks, input_size, output_size, num_experts, hidden_size, k=4):
         super(MoE, self).__init__()
-        self.device = device
         self.n_tasks = n_tasks
         self.num_experts = num_experts
         self.output_size = output_size
@@ -36,7 +35,8 @@ class MoE(nn.Module):
 
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(1)
-        self.normal = Normal(torch.tensor([0.0]).to(device), torch.tensor([1.0]).to(device))
+        self.register_buffer("mean", torch.tensor([0.0]))
+        self.register_buffer("std", torch.tensor([1.0]))
 
         assert(self.k <= self.num_experts)
 
@@ -103,19 +103,20 @@ class MoE(nn.Module):
         Returns:
         a `Tensor` of shape [batch, n].
         """
-
+        device = clean_values.device
         batch = clean_values.size(0)
         m = noisy_top_values.size(1)
         top_values_flat = noisy_top_values.flatten()
         threshold_positions_if_in = torch.arange(batch) * m + self.k
-        threshold_positions_if_in = threshold_positions_if_in.to(self.device)
+        threshold_positions_if_in = threshold_positions_if_in.to(device)
         threshold_if_in = torch.unsqueeze(torch.gather(top_values_flat, 0, threshold_positions_if_in), 1)
         is_in = torch.gt(noisy_values, threshold_if_in)
         threshold_positions_if_out = threshold_positions_if_in - 1
         threshold_if_out = torch.unsqueeze(torch.gather(top_values_flat,0 , threshold_positions_if_out), 1)
         # is each value currently in the top k.
-        prob_if_in = self.normal.cdf((clean_values - threshold_if_in)/noise_stddev)
-        prob_if_out = self.normal.cdf((clean_values - threshold_if_out)/noise_stddev)
+        normal = Normal(self.mean.to(clean_values.device), self.std.to(clean_values.device))
+        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev)
+        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev)
         prob = torch.where(is_in, prob_if_in, prob_if_out)
         return prob
 
@@ -180,7 +181,7 @@ class MoE(nn.Module):
             loss = self.cv_squared(importance) + self.cv_squared(load)
             loss *= loss_coef
 
-            dispatcher = SparseDispatcher(self.device, self.num_experts, gates)
+            dispatcher = SparseDispatcher(self.num_experts, gates)
             expert_inputs = dispatcher.dispatch(x)
             gates = dispatcher.expert_to_gates()
             expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]
@@ -207,14 +208,12 @@ class MLPExpert(nn.Module):
 
 
 class MLPTower(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size):
         super(MLPTower, self).__init__()
-        #self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 1)
-        #self.relu = nn.ReLU()
+        self.fc = nn.Linear(input_size, 1)
 
     def forward(self, x):
-        out = self.fc2(x)
+        out = self.fc(x)
         return out
 
 
@@ -249,10 +248,9 @@ class SparseDispatcher(object):
     `Tensor`s for expert i only the batch elements for which `gates[b, i] > 0`.
     """
 
-    def __init__(self, device, num_experts, gates):
+    def __init__(self, num_experts, gates):
         """Create a SparseDispatcher."""
 
-        self.device = device
         self._gates = gates
         self._num_experts = num_experts
         # sort experts
@@ -302,7 +300,7 @@ class SparseDispatcher(object):
 
         if multiply_by_gates:
             stitched = stitched.mul(self._nonzero_gates)
-        zeros = torch.zeros(self._gates.size(0), expert_out[-1].size(1), requires_grad=True).to(self.device)
+        zeros = torch.zeros(self._gates.size(0), expert_out[-1].size(1), requires_grad=True, device=stitched.device)
         # combine samples that have been processed by the same k experts
         combined = zeros.index_add(0, self._batch_index, stitched.float())
         # add eps to all zero values in order to avoid nans when going back to log space

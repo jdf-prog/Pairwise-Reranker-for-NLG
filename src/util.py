@@ -137,8 +137,8 @@ def set_optim(opt, model):
         # freeze shared embedding layer, no update
         source_encoder_param = [p for p in source_encoder.parameters() if p not in shared_layer_param_set]
         candidate_encoder_param = [p for p in candidate_encoder.parameters() if p not in shared_layer_param_set]
-        # decoder_param = [p for p in decoder.parameters() if p not in shared_layer_param_set]
-        decoder_param = [p for p in decoder.parameters()] # debug
+        decoder_param = [p for p in decoder.parameters() if p not in shared_layer_param_set]
+        # decoder_param = [p for p in decoder.parameters()] # debug
         optim_params = [
             {"params": source_encoder_param, "lr": opt.source_encoder_lr},
             {"params": candidate_encoder_param, "lr": opt.candidate_encoder_lr},

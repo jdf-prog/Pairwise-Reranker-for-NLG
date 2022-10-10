@@ -13,7 +13,7 @@ dev_data_path="./data/cnn_dailymail_val_hypo_min.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
 model_type='dualt5'
 model_size="base"
-name="sel_gen"
+name="moe_sel_gen"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 
 if [ ${model_type} == 't5' ]; then
@@ -54,7 +54,7 @@ python \
         --weight_decay 0.001 \
         --per_gpu_batch_size 1 \
         --n_candidate 6 \
-        --total_step 35000 \
+        --total_step 20000 \
         --warmup_step 5000 \
-        --main_port 19004 \
+        --main_port 19006 \
         --use_aux_loss \

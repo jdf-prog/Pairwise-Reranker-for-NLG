@@ -155,6 +155,11 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
         if not 'id' in example:
             example['id'] = k
         examples.append(example)
+        # debug
+        # scores = [-np.mean([float(score) for score in c['score'].values()]) for c in example['candidates']]
+        # ranks = np.argsort(scores)
+        # example['candidates'] = [c for i, c in enumerate(example['candidates']) if ranks[i] < 3]
+
         for candidate in example['candidates']:
             candidate['score'] = {k:float(v) for k,v in list(candidate['score'].items())[:n_tasks]}
             assert len(candidate['score']) == n_tasks, f"{len(candidate['score'])} != {n_tasks}"

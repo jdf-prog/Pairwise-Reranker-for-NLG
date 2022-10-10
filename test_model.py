@@ -158,7 +158,7 @@ if __name__ == "__main__":
     opt.n_tasks = eval_dataset.n_tasks
 
     # load the model from the checkpoint
-    model = model_class.from_pretrained(opt.model_path, n_tasks=opt.n_tasks, device=opt.device)
+    model = model_class.from_pretrained(opt.model_path)
     model = model.to(opt.device)
 
     logger.info("Start eval")
