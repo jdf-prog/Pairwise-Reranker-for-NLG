@@ -217,7 +217,7 @@ class ModelMultitaskRegression(nn.Module):
         x = self.gelu(x)
         x = self.linear2(x)
         x = self.sigmoid(x) # do regression on [0, 1] scale
-        return x
+        return x, None # no loss
 
 
 class MoERegression(nn.Module):
@@ -257,11 +257,12 @@ class MoERegression(nn.Module):
     def forward(self, x):
         _, n_candidate, _ = x.size()
         pred_scores = []
+        total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(n_candidate):
             encs = x[:, i, :] # [CLS]
             preds_i = self.fc2(self.relu(self.fc1(encs))) # shared bottom
             train = self.training
-            preds_i, _ = self.moe(preds_i, train = train, collect_gates = not(train))
+            preds_i, aux_loss = self.moe(preds_i, train = train, collect_gates = not(train))
             pred_scores_i = []
             for j in range(self.n_tasks):
                 # pred
@@ -270,5 +271,6 @@ class MoERegression(nn.Module):
                 pred_scores_i.append(pred_scors_i_j)
             pred_scores_i = torch.stack(pred_scores_i, dim=1)
             pred_scores.append(pred_scores_i)
+            total_aux_loss += aux_loss
         pred_scores = torch.stack(pred_scores, dim=1)
-        return pred_scores
+        return pred_scores, total_aux_loss
