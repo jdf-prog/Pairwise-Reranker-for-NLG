@@ -114,7 +114,10 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         # compute the predictions scores
         x, aux_loss = self.multi_task_layer(inputs)
         # compute the loss
-        loss = torch.tensor(0.0).to(x.device)
+        if aux_loss is not None:
+            loss = torch.tensor(aux_loss).to(x.device)
+        else:
+            loss = torch.tensor(0.0).to(x.device)
         x_ = x.reshape(-1, self.n_tasks)
         y_ = scores.reshape(-1, self.n_tasks)
         for i in range(self.n_tasks):
@@ -210,7 +213,10 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         # compute the predictions scores
         x, aux_loss = self.multi_task_layer(inputs)
         # compute the loss
-        loss = torch.tensor(0.0).to(x.device)
+        if aux_loss is not None:
+            loss = torch.tensor(aux_loss).to(x.device)
+        else:
+            loss = torch.tensor(0.0).to(x.device)
         x_ = x.reshape(-1, self.n_tasks)
         y_ = scores.reshape(-1, self.n_tasks)
         for i in range(self.n_tasks):
