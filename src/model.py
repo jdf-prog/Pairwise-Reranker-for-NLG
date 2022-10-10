@@ -19,6 +19,7 @@ from src.wrapper import (
     DualEncoderWrapper,
     DualBartDecoderWrapper,
     DualT5DecoderWrapper,
+    ModelMultitaskRegression,
 )
 from scipy.stats import pearsonr
 from transformers.models.bart.modeling_bart import shift_tokens_right
@@ -81,13 +82,8 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         encoder1 = self.model.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.model.encoder = DualEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx)
+        self.model.encoder = DualEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx, self.n_tasks, self.config.d_model)
         self.model.decoder = DualBartDecoderWrapper(self.model.decoder)
-        self.multi_task_layer = ModelMultitaskRegression(
-            self.n_tasks,
-            self.model.config.d_model*2,
-            self.model.config.d_model,
-        )
 
     def unwrap_model(self):
         """
@@ -95,7 +91,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         """
         self.model.encoder = self.model.encoder.encoder1
         self.model.decoder = self.model.decoder.decoder
-        del self.multi_task_layer
 
     def load_hfm(self, state_dict):
         """ load huggingface model """
@@ -107,13 +102,16 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         """
         Compute the auxiliary loss
         """
-        source_cls_embed, candidate_cls_embed = self.model.encoder.get_cls_embed()
-        bzs, n_candidates, d_model = candidate_cls_embed.size()
-        inputs = torch.cat((
-            source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
-            candidate_cls_embed
-        ), dim=-1)
-        return self.multi_task_layer(inputs, scores)
+        x = self.encoder.get_pred_scores()
+        y = scores.to(x.device)
+        # compute the loss
+        loss = torch.tensor(0.0).to(x.device)
+        x_ = x.reshape(-1,self.n_tasks)
+        y_ = y.reshape(-1,self.n_tasks)
+        for i in range(self.n_tasks):
+            loss += F.mse_loss(x_[:, i], y_[:, i], reduction='mean')
+        loss /= self.n_tasks
+        return x, loss
 
     @property
     def encoder(self):
@@ -167,13 +165,8 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         encoder1 = self.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id)
+        self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id, self.n_tasks, self.config.d_model)
         self.decoder = DualT5DecoderWrapper(self.decoder)
-        self.multi_task_layer = ModelMultitaskRegression(
-            self.n_tasks,
-            self.config.d_model*2,
-            self.config.d_model
-        )
 
     def unwrap_model(self):
         """
@@ -181,7 +174,6 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         """
         self.encoder = self.encoder.encoder1
         self.decoder = self.decoder.decoder
-        del self.multi_task_layer
 
     def load_hfm(self, state_dict):
         """ load huggingface model """
@@ -193,14 +185,16 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         """
         Compute the auxiliary loss
         """
-        source_cls_embed, candidate_cls_embed = self.encoder.get_cls_embed()
-        bzs, n_candidates, d_model = candidate_cls_embed.size()
-        inputs = torch.cat((
-            source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
-            candidate_cls_embed
-        ), dim=-1)
-        preds, aux_loss = self.multi_task_layer(inputs, scores)
-        return preds, aux_loss
+        x = self.encoder.get_pred_scores()
+        y = scores.to(x.device)
+        # compute the loss
+        loss = torch.tensor(0.0).to(x.device)
+        x_ = x.reshape(-1,self.n_tasks)
+        y_ = y.reshape(-1,self.n_tasks)
+        for i in range(self.n_tasks):
+            loss += F.mse_loss(x_[:, i], y_[:, i], reduction='mean')
+        loss /= self.n_tasks
+        return x, loss
 
 class FiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config, device='cpu'):
@@ -343,36 +337,7 @@ class FiDT5(transformers.T5ForConditionalGeneration):
         self.wrap_encoder()
 
 
-class ModelMultitaskRegression(nn.Module):
-    """
-        This class is used to train the model for the multitask regression task.
-        Use as a layer return the loss
-    """
-    def __init__(self, n_tasks, input_size, hidden_size):
-        super(ModelMultitaskRegression, self).__init__()
-        self.n_tasks = n_tasks
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.linear = nn.Linear(input_size, hidden_size)
-        self.linear2 = nn.Linear(hidden_size, n_tasks)
-        self.gelu = nn.GELU()
-        self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, y):
-        y = y.to(x.device)
-        x = self.linear(x)
-        x = self.gelu(x)
-        x = self.linear2(x)
-        x = self.sigmoid(x) # do regression on [0, 1] scale
-
-        # compute the loss
-        loss = torch.tensor(0.0).to(x.device)
-        x_ = x.reshape(-1,self.n_tasks)
-        y_ = y.reshape(-1,self.n_tasks)
-        for i in range(self.n_tasks):
-            loss += F.mse_loss(x_[:, i], y_[:, i], reduction='mean')
-        loss /= self.n_tasks
-        return x, loss
 
 
 
@@ -586,6 +551,4 @@ class ModelMultitaskBinary(nn.Module):
         outputs["overall_sum"] = torch.tensor(np.mean(overall_sums)).float().to(loss.device)
 
         return outputs
-
-
 

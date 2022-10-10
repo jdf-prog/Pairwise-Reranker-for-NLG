@@ -13,7 +13,7 @@ dev_data_path="./data/cnn_dailymail_val_hypo_min.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
 model_type='dualt5'
 model_size="base"
-name="5000_warmup"
+name="sel_gen"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 
 if [ ${model_type} == 't5' ]; then
@@ -56,5 +56,5 @@ python \
         --n_candidate 6 \
         --total_step 35000 \
         --warmup_step 5000 \
-        --main_port 19003 \
+        --main_port 19004 \
         --use_aux_loss \
