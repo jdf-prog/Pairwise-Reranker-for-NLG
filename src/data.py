@@ -19,6 +19,7 @@ class Dataset(torch.utils.data.Dataset):
         self.n_candidate = n_candidate
         self.source_prefix = source_prefix
         self.candidate_prefix = candidate_prefix
+        self.n_tasks = len(self.data[0]['candidates'][0]['score']) if 'candidates' in self.data[0] else -1
 
     def __len__(self):
         return len(self.data)
@@ -38,117 +39,137 @@ class Dataset(torch.utils.data.Dataset):
             'source' : self.source_prefix + self.data[index]['source'],
             'target' : self.get_target(self.data[index]),
             'candidates' : [(self.candidate_prefix + "{}").format(c['text']) for c in self.data[index]['candidates'][:self.n_candidate]]  if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
-            'scores' : torch.tensor([[float(score) for score in c['scores']] for c in self.data[index]['candidates'][:self.n_candidate]]) if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
+            'scores' : torch.tensor([[float(score) for score in c['score'].values()] for c in self.data[index]['candidates'][:self.n_candidate]]) if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
         }
 
     def get_example(self, index):
         return self.data[index]
 
-def encode_candidates(batch_text_candidates, tokenizer, max_length):
-    candidate_ids, candidate_masks = [], []
-    for k, text_candidates in enumerate(batch_text_candidates):
+def encode_batch_text(batch_texts, tokenizer, max_length):
+    encoded_ids, encoded_masks = [], []
+    for k, texts in enumerate(batch_texts):
         p = tokenizer.batch_encode_plus(
-            text_candidates,
+            texts,
             max_length=max_length,
-            pad_to_max_length=True,
+            padding='max_length',
             return_tensors='pt',
             truncation=True
         )
-        candidate_ids.append(p['input_ids'][None])
-        candidate_masks.append(p['attention_mask'][None])
+        encoded_ids.append(p['input_ids'][None])
+        encoded_masks.append(p['attention_mask'][None])
 
-    candidate_ids = torch.cat(candidate_ids, dim=0)
-    candidate_masks = torch.cat(candidate_masks, dim=0)
-    return candidate_ids, candidate_masks.bool()
+    encoded_ids = torch.cat(encoded_ids, dim=0)
+    encoded_masks = torch.cat(encoded_masks, dim=0)
+    return encoded_ids, encoded_masks.bool()
 
-class DualCollator(object):
-    def __init__(self, text_maxlength, tokenizer, answer_maxlength=20):
+class DualFiDCollator(object):
+    def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
         self.tokenizer = tokenizer
-        self.text_maxlength = text_maxlength
-        self.answer_maxlength = answer_maxlength
+        self.source_maxlength = source_maxlength
+        self.candidate_maxlength = candidate_maxlength
 
     def __call__(self, batch):
         assert(batch[0]['target'] != None)
         index = torch.tensor([ex['index'] for ex in batch])
         target = [ex['target'] for ex in batch]
+        # encode target
         target = self.tokenizer.batch_encode_plus(
             target,
-            max_length=self.answer_maxlength if self.answer_maxlength > 0 else None,
-            pad_to_max_length=True,
+            padding="longest",
             return_tensors='pt',
-            truncation=True if self.answer_maxlength > 0 else False,
         )
         target_ids = target["input_ids"]
         target_mask = target["attention_mask"].bool()
         target_ids = target_ids.masked_fill(~target_mask, -100)
-        context_texts = [[example['source']] + example['candidates'] for example in batch]
-        context_ids, context_masks = encode_candidates(context_texts,
+        # encode source text
+        source = [ex['source'] for ex in batch]
+        source = self.tokenizer.batch_encode_plus(
+            source,
+            max_length=self.source_maxlength,
+            padding='max_length',
+            return_tensors='pt',
+            truncation=True if self.source_maxlength > 0 else False,
+        )
+        source_ids = source["input_ids"]
+        source_mask = source["attention_mask"].bool()
+        # encode candidate text
+        candidate_texts = [example['candidates'] for example in batch]
+        candidate_ids, candidate_masks = encode_batch_text(candidate_texts,
                                                      self.tokenizer,
-                                                     self.text_maxlength)
+                                                     self.source_maxlength)
+        # context consists of source and candidate texts for each batch
+        # source text being at index 0
+        context_ids = torch.cat([source_ids[:, None], candidate_ids], dim=1)
+        context_masks = torch.cat([source_mask[:, None], candidate_masks], dim=1)
 
-        scores = torch.stack([
-            [
-                list(candidate['scores'].values())
-                for candidate in example['candidates']
-            ]
-            for example in batch
-        ], dim=0)
+        scores = torch.stack([example['scores'] for example in batch], dim=0)
 
         return (index, target_ids, target_mask, context_ids, context_masks, scores)
 
-class Collator(object):
-    def __init__(self, text_maxlength, tokenizer, answer_maxlength=20):
+class FiDCollator(object):
+    def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
         self.tokenizer = tokenizer
-        self.text_maxlength = text_maxlength
-        self.answer_maxlength = answer_maxlength
+        self.source_maxlength = source_maxlength
+        self.candidate_maxlength = candidate_maxlength
 
     def __call__(self, batch):
         assert(batch[0]['target'] != None)
         index = torch.tensor([ex['index'] for ex in batch])
         target = [ex['target'] for ex in batch]
+        # encode target
         target = self.tokenizer.batch_encode_plus(
             target,
-            max_length=self.answer_maxlength if self.answer_maxlength > 0 else None,
-            pad_to_max_length=True,
+            padding="longest",
             return_tensors='pt',
-            truncation=True if self.answer_maxlength > 0 else False,
         )
         target_ids = target["input_ids"]
         target_mask = target["attention_mask"].bool()
         target_ids = target_ids.masked_fill(~target_mask, -100)
-
-        def append_source(example):
-            if example['candidates'] is None:
-                return [example['source']]
+        # encode FiD texts
+        def append_candidates(example):
             return [t + " " + example['source'] for t in example['candidates']]
-        text_candidates = [append_source(example) for example in batch]
-        candidate_ids, candidate_masks = encode_candidates(text_candidates,
-                                                     self.tokenizer,
-                                                     self.text_maxlength)
+        texts = [append_candidates(example) for example in batch]
+        context_ids, context_masks = encode_batch_text(texts,
+            self.tokenizer,
+            self.source_maxlength + self.candidate_maxlength)
 
-        return (index, target_ids, target_mask, candidate_ids, candidate_masks)
+        scores = torch.stack([example['scores'] for example in batch], dim=0)
 
-def load_data(data_path=None, global_rank=-1, world_size=-1):
+        return (index, target_ids, target_mask, context_ids, context_masks, scores)
+
+def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
     assert data_path
+    print("Loading data from {}".format(data_path))
     if data_path.endswith('.jsonl'):
-        data = open(data_path, 'r')
+        with open(data_path) as f:
+            data = [json.loads(line) for line in f.readlines()]
     elif data_path.endswith('.json'):
         with open(data_path, 'r') as fin:
             data = json.load(fin)
     examples = []
+    if n_tasks < 0:
+        n_tasks = len(data[0]['candidates'][0]['score'])
     for k, example in enumerate(data):
         if global_rank > -1 and not k%world_size==global_rank:
             continue
-        if data_path is not None and data_path.endswith('.jsonl'):
-            example = json.loads(example)
         if not 'id' in example:
             example['id'] = k
-        for c in example['ctxs']:
-            if not 'score' in c:
-                c['score'] = 1.0 / (k + 1)
         examples.append(example)
-    ## egrave: is this needed?
-    if data_path is not None and data_path.endswith('.jsonl'):
-        data.close()
-
+        for candidate in example['candidates']:
+            candidate['score'] = {k:float(v) for k,v in list(candidate['score'].items())[:n_tasks]}
+            assert len(candidate['score']) == n_tasks, f"{len(candidate['score'])} != {n_tasks}"
+    check_scores(examples)
     return examples
+
+def check_scores(examples):
+    """
+        Check the upper bound of the scores and print it
+    """
+    task_names = list(examples[0]['candidates'][0]['score'].keys())
+    max_scores = {task:[] for task in task_names}
+    for example in examples:
+        for task in task_names:
+            max_scores[task].append(max([c['score'][task] for c in example['candidates']]))
+    for task in task_names:
+        print(f"Selection Upper bound for task '{task}' is {np.mean(max_scores[task])}")
+

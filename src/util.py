@@ -127,12 +127,30 @@ def set_dropout(model, dropout_rate):
         if isinstance(mod, torch.nn.Dropout):
             mod.p = dropout_rate
 
-
 def set_optim(opt, model):
+    if opt.use_dual_encoder:
+        source_encoder = model.encoder.encoder1
+        candidate_encoder = model.encoder.encoder2
+        decoder = model.decoder
+        shared_layer = model.shared
+        shared_layer_param_set = set(shared_layer.parameters())
+        # freeze shared embedding layer, no update
+        source_encoder_param = [p for p in source_encoder.parameters() if p not in shared_layer_param_set]
+        candidate_encoder_param = [p for p in candidate_encoder.parameters() if p not in shared_layer_param_set]
+        # decoder_param = [p for p in decoder.parameters() if p not in shared_layer_param_set]
+        decoder_param = [p for p in decoder.parameters()] # debug
+        optim_params = [
+            {"params": source_encoder_param, "lr": opt.source_encoder_lr},
+            {"params": candidate_encoder_param, "lr": opt.candidate_encoder_lr},
+            {"params": decoder_param, "lr": opt.decoder_lr},
+        ]
+    else:
+        optim_params = model.parameters()
+
     if opt.optim == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
+        optimizer = torch.optim.Adam(optim_params)
     elif opt.optim == 'adamw':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr, weight_decay=opt.weight_decay)
+        optimizer = torch.optim.AdamW(optim_params, weight_decay=opt.weight_decay)
     if opt.scheduler == 'fixed':
         scheduler = FixedScheduler(optimizer)
     elif opt.scheduler == 'linear':
@@ -209,18 +227,4 @@ def save_distributed_dataset(data, opt):
             json.dump(alldata, fout, indent=4)
         write_path.rmdir()
 
-def load_passages(path):
-    if not os.path.exists(path):
-        logger.info(f'{path} does not exist')
-        return
-    logger.info(f'Loading passages from: {path}')
-    passages = []
-    with open(path) as fin:
-        reader = csv.reader(fin, delimiter='\t')
-        for k, row in enumerate(reader):
-            if not row[0] == 'id':
-                try:
-                    passages.append((row[0], row[1], row[2]))
-                except:
-                    logger.warning(f'The following input line has not been correctly loaded: {row}')
-    return passages
+

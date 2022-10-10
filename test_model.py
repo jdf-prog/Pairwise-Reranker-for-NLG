@@ -13,76 +13,87 @@ from torch.utils.data import DataLoader, SequentialSampler
 from torchmetrics.text.rouge import ROUGEScore
 from tqdm import tqdm
 
+import src.slurm
 import src.util
 from src.options import Options
 import src.data
 import src.model
+import warnings
+warnings.filterwarnings("ignore")
+
 
 def evaluate(model, dataset, dataloader, tokenizer, opt):
     rouge_score = ROUGEScore(rouge_keys=("rouge1", "rouge2", "rougeL"), use_stemmer=True).to(torch.device("cuda", 0)) # select score here
-    loss, curr_loss = 0.0, 0.0
     model.eval()
     if hasattr(model, "module"):
         model = model.module
-    if opt.write_crossattention_scores:
-        model.overwrite_forward_crossattention()
-        model.reset_score_storage()
-    total = 0
-    exactmatch = []
     if opt.write_results:
         write_path = Path(opt.checkpoint_dir) / opt.name / 'test_results'
         fw = open(write_path / ('%d.txt'%opt.global_rank), 'a')
+    rouge_scores_sel = []
+    rouge_scores_gen = []
+
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
-            (idx, _, _, context_ids, context_mask) = batch
-
-            if opt.write_crossattention_scores:
-                model.reset_score_storage()
-
+            (idx, _, _, context_ids, context_masks, scores) = batch
             outputs = model.generate(
                 input_ids=context_ids.cuda(),
-                attention_mask=context_mask.cuda(),
-                max_length=200,
-                min_length=20,
-                num_beams=4,
+                attention_mask=context_masks.cuda(),
+                max_length=opt.max_length,
+                num_beams=opt.num_beams,
+                min_length=opt.min_length,
             )
+            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                preds, aux_loss = model.module.compute_auxiliary_loss(scores)
+            else:
+                preds, aux_loss = model.compute_auxiliary_loss(scores)
 
-            if opt.write_crossattention_scores:
-                crossattention_scores = model.get_crossattention_scores(context_mask.cuda())
+            for k, pred in enumerate(preds):
+                select_idx = torch.argmax(torch.sum(pred, dim=-1))
+                ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
+                example = dataset.get_example(idx[k])
+                gold = example['target']
+                score = rouge_score(ans, gold)
+                rouge_scores_sel.append(score)
+                if opt.write_results:
+                    fw.write(str(example['id']) + "\t" + ans + '\n')
 
             for k, o in enumerate(outputs):
                 ans = tokenizer.decode(o, skip_special_tokens=True)
-                example = dataset.data[idx[k]]
-                if 'answers' in example:
-                    rouge_score.update(ans, example['answers'])
-
+                example = dataset.get_example(idx[k])
+                gold = example['target']
+                score = rouge_score(ans, gold)
+                rouge_scores_gen.append(score)
                 if opt.write_results:
                     fw.write(str(example['id']) + "\t" + ans + '\n')
-                if opt.write_crossattention_scores:
-                    for j in range(context_ids.size(1)):
-                        example['ctxs'][j]['score'] = crossattention_scores[k, j].item()
 
-                total += 1
             if (i + 1) % opt.eval_print_freq == 0:
                 log = f'Process rank:{opt.global_rank}, {i+1} / {len(dataloader)}'
-                result = rouge_score.compute()
+                result = {
+                    'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
+                    'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
+                    'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+                }
                 for k, v in result.items():
                     log += f' |\n {k} = {v:.3f}'
                 logger.warning(log)
     log = f'Process rank:{opt.global_rank}, final result'
-    result = rouge_score.compute()
+    result = {
+        'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
+        'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
+        'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+    }
     for k, v in result.items():
         log += f' |\n {k} = {v:.3f}'
     logger.warning(log)
+    # sync across processes
     if opt.is_distributed:
         torch.distributed.barrier()
-
     return result
 
 
 if __name__ == "__main__":
     options = Options()
-    options.add_reader_options()
     options.add_eval_options()
     opt = options.parse()
     src.slurm.init_distributed_mode(opt)
@@ -105,22 +116,22 @@ if __name__ == "__main__":
         model_name = "t5-" + opt.model_size
         model_class = src.model.FiDT5
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.Collator(opt.text_maxlength, tokenizer)
+        collator_function = src.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'dualt5':
         model_name = "t5-" + opt.model_size
         model_class = src.model.DualFiDT5
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.DualCollator(opt.text_maxlength, tokenizer)
+        collator_function = src.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'bart':
         model_name = "facebook/bart-" + opt.model_size
         model_class = src.model.FiDBART
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.Collator(opt.text_maxlength, tokenizer)
+        collator_function = src.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'dualbart':
         model_name = "facebook/bart-" + opt.model_size
         model_class = src.model.DualFiDBART
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.DualCollator(opt.text_maxlength, tokenizer)
+        collator_function = src.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
 
     else:
         raise NotImplementedError
@@ -128,11 +139,12 @@ if __name__ == "__main__":
     eval_examples = src.data.load_data(
         opt.eval_data,
         global_rank=opt.global_rank, #use the global rank and world size attibutes to split the eval set on multiple gpus
-        world_size=opt.world_size
+        world_size=opt.world_size,
+        n_tasks=opt.n_tasks,
     )
     eval_dataset = src.data.Dataset(
         eval_examples,
-        opt.n_context,
+        opt.n_candidate,
     )
 
     eval_sampler = SequentialSampler(eval_dataset)
@@ -143,8 +155,10 @@ if __name__ == "__main__":
         num_workers=20,
         collate_fn=collator_function
     )
+    opt.n_tasks = eval_dataset.n_tasks
 
-    model = model_class.from_pretrained(opt.model_path)
+    # load the model from the checkpoint
+    model = model_class.from_pretrained(opt.model_path, n_tasks=opt.n_tasks, device=opt.device)
     model = model.to(opt.device)
 
     logger.info("Start eval")
@@ -154,6 +168,4 @@ if __name__ == "__main__":
         glob_path = Path(opt.checkpoint_dir) / opt.name / 'test_results'
         write_path = Path(opt.checkpoint_dir) / opt.name / 'final_output.txt'
         src.util.write_output(glob_path, write_path)
-    if opt.write_crossattention_scores:
-        src.util.save_distributed_dataset(eval_dataset.data, opt)
 

@@ -2,8 +2,26 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import copy
+from transformers.modeling_outputs import BaseModelOutput
 
 
+class EncoderWrapper(torch.nn.Module):
+    """
+    Encoder Wrapper for Wrapper to obtain a Fusion-in-Decoder model.
+    """
+    def __init__(self, encoder):
+        super().__init__()
+        self.encoder = encoder
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs,):
+        # total_length = n_ctx * passage_length
+        bsz, total_length = input_ids.shape
+        passage_length = total_length // self.n_ctx
+        input_ids = input_ids.view(bsz*self.n_ctx, passage_length)
+        attention_mask = attention_mask.view(bsz*self.n_ctx, passage_length)
+        outputs = self.encoder(input_ids, attention_mask, **kwargs)
+        outputs = (outputs[0].reshape(bsz, self.n_ctx*passage_length, -1), ) + outputs[1:]
+        return outputs
 
 class DualEncoderWrapper(torch.nn.Module):
     """
@@ -22,6 +40,8 @@ class DualEncoderWrapper(torch.nn.Module):
         self.encoder2 = encoder2
         self.padding_idx = padding_idx
         self.n_ctx = None # number of candidates + 1 (source), should be set before forward
+        self.source_cls_embedding = None
+        self.candidate_cls_embedding = None
 
     def reduce_padding(self, input_ids, attention_mask):
         """
@@ -34,7 +54,7 @@ class DualEncoderWrapper(torch.nn.Module):
         reduced_length = input_ids.size(1)
         return input_ids, attention_mask, reduced_length
 
-    def forward(self, input_ids=None, attention_mask=None, **kwargs,):
+    def forward(self, input_ids=None, attention_mask=None, return_dict=None, **kwargs):
         assert self.n_ctx is not None, "n_ctx is not set"
         # total_length = n_ctx * ctx_length
         bsz, total_length = input_ids.shape
@@ -51,25 +71,70 @@ class DualEncoderWrapper(torch.nn.Module):
         encoder1_outputs = self.encoder1(source_input_ids, source_attention_mask, **kwargs)
         encoder2_outputs = self.encoder2(candidate_input_ids, candidate_attention_mask, **kwargs)
         # save the cls embedding for this batch for MoE Loss
-        self.source_cls_embedding = encoder1_outputs[0][:, 0, :]
-        self.candidate_cls_embedding = encoder2_outputs[0][:, ::candidate_length, :].reshape(bsz, self.n_ctx-1, -1)
-        # concatenate the 2 outputs
+        if self.source_cls_embedding is None or self.candidate_cls_embedding is None:
+            self.source_cls_embedding = encoder1_outputs[0][:, 0, :]
+            self.candidate_cls_embedding = encoder2_outputs[0][:, ::candidate_length, :].reshape(bsz, self.n_ctx-1, -1)
+        else:
+            torch.cat((self.source_cls_embedding, encoder1_outputs[0][:, 0, :]), dim=0)
+            torch.cat((self.candidate_cls_embedding, encoder2_outputs[0][:, ::candidate_length, :].reshape(bsz, self.n_ctx-1, -1)), dim=0)
+
+        # concatenate the outputs of the 2 encoders
         outputs = tuple()
-        # encoder outputs
+        # 1. last_hidden_state
         encoder1_output = encoder1_outputs[0].reshape(bsz, source_length, -1)
         encoder2_output = encoder2_outputs[0].reshape(bsz, (self.n_ctx-1) * candidate_length, -1)
         outputs += (torch.cat([encoder1_output, encoder2_output], dim=1), )
-        # hidden states and attentions
-        for i in range(1, len(encoder1_outputs)):
-            outputs += ((encoder1_outputs[i], encoder2_outputs[i]), )
-        return outputs
+        # 2. all hidden states
+        if (len(encoder1_outputs) >= 2 and
+            len(encoder2_outputs) >= 2 and
+            encoder1_outputs[1] is not None and
+            encoder2_outputs[1] is not None):
+            hidden_states = tuple()
+            for i in range(len(encoder1_outputs[1])):
+                encoder1_output = encoder1_outputs[1][i].reshape(bsz, source_length, -1)
+                encoder2_output = encoder2_outputs[1][i].reshape(bsz, (self.n_ctx-1) * candidate_length, -1)
+                hidden_states += (torch.cat([encoder1_output, encoder2_output], dim=1), )
+            outputs += (hidden_states, )
+        else:
+            outputs += (None, )
+        # 3. all attentions
+        if (len(encoder1_outputs) >= 3 and
+            len(encoder2_outputs) >= 3 and
+            encoder1_outputs[2] is not None and
+            encoder2_outputs[2] is not None):
+            attentions = tuple()
+            for i in range(len(encoder1_outputs[2])):
+                encoder1_output = encoder1_outputs[2][i].reshape(bsz, source_length, -1)
+                encoder2_output = encoder2_outputs[2][i].reshape(bsz, (self.n_ctx-1) * candidate_length, -1)
+                attentions += (torch.cat([encoder1_output, encoder2_output], dim=1), )
+            outputs += (attentions, )
+        else:
+            outputs += (None, )
 
-    def get_cls_embedding(self):
+        # Wrap the outputs in a BaseModelOutput when return_dict is True
+        if return_dict:
+            return BaseModelOutput(
+                last_hidden_state=outputs[0],
+                hidden_states=outputs[1] if len(outputs) > 1 else None,
+                attentions=outputs[2] if len(outputs) > 2 else None,
+            )
+        else:
+            return tuple(v for v in outputs if v is not None)
+
+    def get_cls_embed(self):
         """
-            Get the cls embedding of both encoder1 and encoder2
-            during this batch step
+            Get the cls embedding of both encoder1 and encoder2 from the steps before
+            set to empty once get
+            Returns:
+                source_cls_embedding: [bsz*accum_steps, hidden_size]
+                candidate_cls_embedding: [bsz*accum_steps, n_ctx-1, hidden_size]
         """
-        return self.source_cls_embedding, self.candidate_cls_embedding
+        if self.source_cls_embedding is None or self.candidate_cls_embedding is None:
+            raise ValueError("source_cls_embedding or candidate_cls_embedding is not set, please run forward first")
+        result = (self.source_cls_embedding, self.candidate_cls_embedding)
+        self.source_cls_embedding = None
+        self.candidate_cls_embedding = None
+        return result
 
 class DualBartDecoderWrapper(torch.nn.Module):
     """

@@ -9,13 +9,13 @@
 train_data_path="./data/cnn_dailymail_train_hypo.jsonl"
 dev_data_path="./data/cnn_dailymail_val_hypo.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
-test_data_path="./data/cnn_dailymail_val_hypo.jsonl"
-model_type='dualbart'
-model_size="large"
-name="basic"
+test_data_path="./data/cnn_dailymail_val_hypo_min.jsonl"
+model_type='dualt5'
+model_size="base"
+name="select"
 
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
-model_path="${checkpoint_dir}/${name}/checkpoint/best_dev"
+model_path="${checkpoint_dir}/${name}/checkpoint/step-15000"
 if [ ${model_type} == 't5' ]; then
         text_maxlength=512
 elif [ ${model_type} == 'bart' ]; then
@@ -44,7 +44,8 @@ python test_model.py \
         --checkpoint_dir ${checkpoint_dir} \
         --model_path ${model_path} \
         --eval_data ${test_data_path} \
-        --text_maxlength ${text_maxlength} \
+        --source_maxlength ${text_maxlength} \
+        --candidate_maxlength ${text_maxlength} \
         --per_gpu_batch_size 2 \
-        --n_context 6 \
+        --n_candidate 6 \
         --main_port 19010 \

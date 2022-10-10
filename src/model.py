@@ -13,8 +13,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 import copy
-import torch.functional as F
+import torch.nn.functional as F
 from src.wrapper import (
+    EncoderWrapper,
     DualEncoderWrapper,
     DualBartDecoderWrapper,
     DualT5DecoderWrapper,
@@ -23,10 +24,11 @@ from scipy.stats import pearsonr
 from transformers.models.bart.modeling_bart import shift_tokens_right
 from src.model_moe import MoE, MLPTower
 class DualFiDBART(transformers.BartForConditionalGeneration):
-    def __init__(self, config, n_tasks=1):
+    def __init__(self, config, n_tasks=1, device='cpu'):
         super().__init__(config)
-        self.wrap_model()
         self.n_tasks = n_tasks
+        self.device = device
+        self.wrap_model()
 
     # We need to resize as B x (N * L) instead of (B * N) x L here
     # because the BART forward method uses the input tensors to infer
@@ -78,12 +80,13 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         """
         encoder1 = self.model.encoder
         encoder2 = copy.deepcopy(encoder1)
+        encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
         self.model.encoder = DualEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx)
         self.model.decoder = DualBartDecoderWrapper(self.model.decoder)
         self.multi_task_layer = ModelMultitaskRegression(
             self.n_tasks,
             self.model.config.d_model*2,
-            self.model.config.d_model
+            self.model.config.d_model,
         )
 
     def unwrap_model(self):
@@ -100,28 +103,198 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         self.load_state_dict(state_dict)
         self.wrap_model()
 
-    def compute_aux_loss(self, scores):
+    def compute_auxiliary_loss(self, scores):
         """
         Compute the auxiliary loss
         """
         source_cls_embed, candidate_cls_embed = self.model.encoder.get_cls_embed()
-        bzs, n_candidates, d_model = candidate_cls_embed.size(1)
+        bzs, n_candidates, d_model = candidate_cls_embed.size()
         inputs = torch.cat((
             source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
             candidate_cls_embed
         ), dim=-1)
         return self.multi_task_layer(inputs, scores)
 
+    @property
+    def encoder(self):
+        return self.model.encoder
+
+    @property
+    def decoder(self):
+        return self.model.decoder
+
+    @property
+    def shared(self):
+        return self.model.shared
+
 class DualFiDT5(transformers.T5ForConditionalGeneration):
-    def __init__(self, config, n_tasks=1):
+    def __init__(self, config, n_tasks=1, device='cpu'):
         super().__init__(config)
-        self.wrap_model()
         self.n_tasks = n_tasks
+        self.wrap_model()
 
     # We need to resize as B x (N * L) instead of (B * N) x L here
     # because the T5 forward method uses the input tensors to infer
     # dimensions used in the decoder.
     # EncoderWrapper resizes the inputs as (B * N) x L.
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        if input_ids != None:
+            # inputs might have already be resized in the generate method
+            if input_ids.dim() == 3:
+                self.encoder.n_ctx = input_ids.size(1)
+            input_ids = input_ids.view(input_ids.size(0), -1)
+        if attention_mask != None:
+            attention_mask = attention_mask.view(attention_mask.size(0), -1)
+        return super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            **kwargs
+        )
+
+    # We need to resize the inputs here, as the generate method expect 2D tensors
+    def generate(self, input_ids, attention_mask, **kwargs):
+        self.encoder.n_ctx = input_ids.size(1)
+        return super().generate(
+            input_ids=input_ids.view(input_ids.size(0), -1),
+            attention_mask=attention_mask.view(attention_mask.size(0), -1),
+            **kwargs
+        )
+
+    def wrap_model(self):
+        """
+        Wrap the model's encoder, decoder with EncoderWrapper, DecoderWrapper.
+        """
+        encoder1 = self.encoder
+        encoder2 = copy.deepcopy(encoder1)
+        encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
+        self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id)
+        self.decoder = DualT5DecoderWrapper(self.decoder)
+        self.multi_task_layer = ModelMultitaskRegression(
+            self.n_tasks,
+            self.config.d_model*2,
+            self.config.d_model
+        )
+
+    def unwrap_model(self):
+        """
+        Unwrap the model's encoder, decoder
+        """
+        self.encoder = self.encoder.encoder1
+        self.decoder = self.decoder.decoder
+        del self.multi_task_layer
+
+    def load_hfm(self, state_dict):
+        """ load huggingface model """
+        self.unwrap_model()
+        self.load_state_dict(state_dict)
+        self.wrap_model()
+
+    def compute_auxiliary_loss(self, scores):
+        """
+        Compute the auxiliary loss
+        """
+        source_cls_embed, candidate_cls_embed = self.encoder.get_cls_embed()
+        bzs, n_candidates, d_model = candidate_cls_embed.size()
+        inputs = torch.cat((
+            source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
+            candidate_cls_embed
+        ), dim=-1)
+        preds, aux_loss = self.multi_task_layer(inputs, scores)
+        return preds, aux_loss
+
+class FiDBART(transformers.BartForConditionalGeneration):
+    def __init__(self, config, device='cpu'):
+        super().__init__(config)
+        self.device = device
+        self.wrap_encoder()
+
+    # We need to resize as B x (N * L) instead of (B * N) x L here
+    # because the BART forward method uses the input tensors to infer
+    # dimensions used in the decoder.
+    # EncoderWrapper resizes the inputs as (B * N) x L.
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        labels=None,
+        decoder_input_ids=None,
+        decoder_attention_mask=None,
+        **kwargs):
+        if input_ids != None:
+            # inputs might have already be resized in the generate method
+            if input_ids.dim() == 3:
+                self.model.encoder.n_ctx = input_ids.size(1) - 1
+            input_ids = input_ids.view(input_ids.size(0), -1)
+        if attention_mask != None:
+            attention_mask = attention_mask.view(attention_mask.size(0), -1)
+
+        # generate decoder input_ids from labels instead of input_ids
+        decoder_input_ids = shift_tokens_right(
+            labels,
+            self.config.pad_token_id,
+            self.config.decoder_start_token_id)
+        return super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            labels=labels,
+            **kwargs
+        )
+
+    # We need to resize the inputs here, as the generate method expect 2D tensors
+    def generate(self, input_ids, attention_mask, max_length, **kwargs):
+        self.model.encoder.n_ctx = input_ids.size(1)
+        return super().generate(
+            input_ids=input_ids.view(input_ids.size(0), -1),
+            attention_mask=attention_mask.view(attention_mask.size(0), -1),
+            max_length=max_length,
+            **kwargs
+        )
+
+    def wrap_encoder(self):
+        """
+        Wrap BART encoder to obtain a Fusion-in-Decoder model.
+        """
+        self.model.encoder = EncoderWrapper(self.model.encoder)
+
+    def unwrap_encoder(self):
+        """
+        Unwrap Fusion-in-Decoder encoder, useful to load BART weights.
+        """
+        self.model.encoder = self.model.encoder.encoder
+
+    def load_hfm(self, state_dict):
+        """ load huggingface model """
+        self.unwrap_encoder()
+        self.load_state_dict(state_dict)
+        self.wrap_encoder()
+
+    @property
+    def encoder(self):
+        return self.model.encoder
+
+    @property
+    def decoder(self):
+        return self.model.decoder
+
+
+class FiDT5(transformers.T5ForConditionalGeneration):
+    def __init__(self, config, device='cpu'):
+        super().__init__(config)
+        self.device = device
+        self.wrap_encoder()
+
+    def forward_(self, **kwargs):
+        if 'input_ids' in kwargs:
+            kwargs['input_ids'] = kwargs['input_ids'].view(kwargs['input_ids'].size(0), -1)
+        if 'attention_mask' in kwargs:
+            kwargs['attention_mask'] = kwargs['attention_mask'].view(kwargs['attention_mask'].size(0), -1)
+
+        return super(FiDT5, self).forward(
+            **kwargs
+        )
+
     def forward(self, input_ids=None, attention_mask=None, **kwargs):
         if input_ids != None:
             # inputs might have already be resized in the generate method
@@ -146,47 +319,28 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             **kwargs
         )
 
-    def wrap_model(self):
+    def wrap_encoder(self):
         """
-        Wrap the model's encoder, decoder with EncoderWrapper, DecoderWrapper.
+        Wrap T5 encoder to obtain a Fusion-in-Decoder model.
         """
-        encoder1 = self.encoder
-        encoder2 = copy.deepcopy(encoder1)
-        self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id)
-        self.decoder = DualT5DecoderWrapper(self.decoder)
-        self.multi_task_layer = ModelMultitaskRegression(
-            self.n_tasks,
-            self.config.d_model*2,
-            self.config.d_model
-        )
+        self.encoder = EncoderWrapper(self.encoder)
 
-    def unwrap_model(self):
+    def unwrap_encoder(self):
         """
-        Unwrap the model's encoder, decoder
+        Unwrap Fusion-in-Decoder encoder, useful to load T5 weights.
         """
-        self.encoder = self.encoder.encoder1
-        self.decoder = self.decoder.decoder
-        del self.multi_task_layer
+        self.encoder = self.encoder.encoder
+        block = []
+        for mod in self.encoder.block:
+            block.append(mod.module)
+        block = nn.ModuleList(block)
+        self.encoder.block = block
 
     def load_hfm(self, state_dict):
         """ load huggingface model """
         self.unwrap_encoder()
-        self.unwrap_decoder()
         self.load_state_dict(state_dict)
         self.wrap_encoder()
-        self.wrap_decoder()
-
-    def compute_aux_loss(self, scores):
-        """
-        Compute the auxiliary loss
-        """
-        source_cls_embed, candidate_cls_embed = self.model.encoder.get_cls_embed()
-        bzs, n_candidates, d_model = candidate_cls_embed.size(1)
-        inputs = torch.cat((
-            source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
-            candidate_cls_embed
-        ), dim=-1)
-        return self.multi_task_layer(inputs, scores)
 
 
 class ModelMultitaskRegression(nn.Module):
@@ -205,8 +359,7 @@ class ModelMultitaskRegression(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, y):
-        x = x.reshape(-1, self.input_size)
-        y = y.reshape(-1, self.n_tasks)
+        y = y.to(x.device)
         x = self.linear(x)
         x = self.gelu(x)
         x = self.linear2(x)
@@ -214,8 +367,10 @@ class ModelMultitaskRegression(nn.Module):
 
         # compute the loss
         loss = torch.tensor(0.0).to(x.device)
+        x_ = x.reshape(-1,self.n_tasks)
+        y_ = y.reshape(-1,self.n_tasks)
         for i in range(self.n_tasks):
-            loss += F.mse_loss(x[:, i], y[:, i], reduction='mean')
+            loss += F.mse_loss(x_[:, i], y_[:, i], reduction='mean')
         loss /= self.n_tasks
         return x, loss
 
@@ -235,21 +390,24 @@ class ModelMultitaskBinary(nn.Module):
         We don't use this layer for any prediction.
     """
 
-    def __init__(self, pretrained_model, tokenizer, args):
+    def __init__(self, device, n_tasks, input_size, hidden_size, num_experts=6, expert_hidden_size=1024, k=3, tower_hidden_size=1024):
         super(ModelMultitaskBinary, self).__init__()
-        self.tokenizer = tokenizer
-        self.args = args
-
-        # LM
-        self.pretrained_model = pretrained_model
+        self.device = device
+        self.n_tasks = n_tasks
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_experts = num_experts
+        self.expert_hidden_size = expert_hidden_size
+        self.k = k
+        self.tower_hidden_size = tower_hidden_size
         # shared bottom
-        self.fc1 = nn.Linear(args.hidden_size, args.bottom_hidden_size)
+        self.fc1 = nn.Linear(input_size, hidden_size)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(args.bottom_hidden_size, args.hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
         # MoE
-        self.moe = MoE(args.device, args.n_tasks, args.hidden_size, args.hidden_size, args.num_experts, args.expert_hidden_size, args.k)
+        self.moe = MoE(device, n_tasks, hidden_size, hidden_size, num_experts, expert_hidden_size, k)
         # towers - one for each task
-        self.towers = nn.ModuleList([MLPTower(args.hidden_size, args.tower_hidden_size) for i in range(args.n_tasks)])
+        self.towers = nn.ModuleList([MLPTower(hidden_size, tower_hidden_size) for i in range(n_tasks)])
         self.sigmoid = nn.Sigmoid()
 
         self.loss = nn.BCEWithLogitsLoss()
@@ -262,7 +420,7 @@ class ModelMultitaskBinary(nn.Module):
         self.training_labels = {}
         self.training_scores = {}
         self.training_hits = {}
-        for j in range(self.args.n_tasks):
+        for j in range(n_tasks):
             self.original_training_labels[j] = []
             self.training_labels[j] = []
             self.training_scores[j] = []
@@ -271,7 +429,7 @@ class ModelMultitaskBinary(nn.Module):
         # multi-summary evaluation
         self.multi_summary_pred_idx = {}
         self.multi_summary_preds = {}
-        for j in range(self.args.n_tasks):
+        for j in range(n_tasks):
             self.multi_summary_pred_idx[j] = []
             self.multi_summary_preds[j] = []
 
@@ -326,22 +484,19 @@ class ModelMultitaskBinary(nn.Module):
         m_corr = np.mean(correlations)
         print("Mean intersection between pairs of pred idx: {:.4f}, mean Pearson correlation: {:.4f}".format(m_intersection, m_corr))
 
-    def forward(self, source_cls_embed, candidate_cls_embed, text_and_summaries_mask, scores):
-        loss = torch.tensor(0.0).to(self.pretrained_model.device)
-        accuracy = [0 for j in range(self.args.n_tasks)]
-        rank = [0 for j in range(self.args.n_tasks)]
-        predictions_idx = [[] for j in range(self.args.n_tasks)]
-        predictions = [[] for j in range(self.args.n_tasks)]
+    def forward(self, cls_embed, scores, train=True):
+        bzs, n_candidate, d_input = cls_embed.shape
+        d_model = d_input // 2
+        loss = torch.tensor(0.0).to(cls_embed.device)
         total_predictions_idx = []
         overall_sums = []
         overall_predictions = []
-        for i in range(text_and_summaries_ids.shape[0]):
-
+        for i in range(n_candidate):
             # labels construction
             scores_i = scores[i]
             original_scores_i = scores_i.clone().detach()
-            labels_i = torch.zeros(scores_i.shape, device = self.pretrained_model.device)
-            for j in range(self.args.n_tasks):
+            labels_i = torch.zeros(scores_i.shape, device = cls_embed.device)
+            for j in range(self.n_tasks):
                 best_j = scores_i[j].max()
                 if self.args.sharp_pos:
                     if best_j > scores_i[j].min():
@@ -349,21 +504,19 @@ class ModelMultitaskBinary(nn.Module):
                 else:
                     labels_i[j][scores_i[j] == best_j] = 1
             original_labels_i = labels_i.clone().detach()
-
             # model output
-            encs = encs[:, 0, :] # [CLS]
+            encs = encs[:, i, :] # [CLS]
             # shared bottom
             if self.args.use_shared_bottom:
                 preds_i = self.fc2(self.relu(self.fc1(encs)))
             else:
                 preds_i = encs
             # MoE
-            train = torch.sum(mode) > 0
             preds_i, aux_loss_i = self.moe(preds_i, train = train, collect_gates = not(train))
 
-            loss_i = torch.tensor(0.0).to(self.pretrained_model.device)
+            loss_i = torch.tensor(0.0).to(cls_embed.device)
             total_predictions = np.zeros(len(preds_i[0]))
-            for j in range(self.args.n_tasks):
+            for j in range(self.n_tasks):
 
                 # pred
                 preds_i_j = self.towers[j](preds_i[j])[:, 0]

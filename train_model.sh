@@ -12,8 +12,8 @@ train_data_path="./data/cnn_dailymail_train_hypo.jsonl"
 dev_data_path="./data/cnn_dailymail_val_hypo_min.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
 model_type='dualt5'
-model_size="large"
-name="basic"
+model_size="base"
+name="5000_warmup"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 
 if [ ${model_type} == 't5' ]; then
@@ -37,22 +37,24 @@ echo "name: ${name}"
 echo "text_maxlength: ${text_maxlength}"
 
 nvidia-smi
-# torchrun \
-        # --nproc_per_node=$NGPU \
-        python train_model.py \
+# torchrun --nproc_per_node=$NGPU \
+python \
+        train_model.py \
         --name "${name}" \
         --train_data ${train_data_path} \
         --eval_data ${dev_data_path} \
         --model_type ${model_type} \
         --model_size ${model_size} \
-        --text_maxlength ${text_maxlength} \
+        --source_maxlength ${text_maxlength} \
+        --candidate_maxlength ${text_maxlength} \
         --checkpoint_dir ${checkpoint_dir} \
         --lr 0.00003 \
         --optim adamw \
         --scheduler linear \
         --weight_decay 0.001 \
         --per_gpu_batch_size 1 \
-        --n_context 6 \
-        --total_step 15000 \
-        --warmup_step 2000 \
-        --main_port 19007 \
+        --n_candidate 6 \
+        --total_step 35000 \
+        --warmup_step 5000 \
+        --main_port 19003 \
+        --use_aux_loss \
