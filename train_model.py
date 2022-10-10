@@ -270,7 +270,8 @@ if __name__ == "__main__":
 
     if not checkpoint_exists and opt.model_path == "none":
         hf_model = hf_model_class.from_pretrained(model_name)
-        model = model_class(hf_model.config, opt.n_tasks, opt.local_rank)
+        hf_model.config.n_tasks = opt.n_tasks
+        model = model_class(hf_model.config)
         model.load_hfm(hf_model.state_dict())
         model = model.to(opt.local_rank)
         optimizer, scheduler = src.util.set_optim(opt, model)
