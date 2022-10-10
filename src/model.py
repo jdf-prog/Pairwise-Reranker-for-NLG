@@ -119,11 +119,11 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         else:
             loss = torch.tensor(0.0).to(x.device)
         x_ = x.reshape(-1, self.n_tasks)
-        y_ = scores.reshape(-1, self.n_tasks)
+        y_ = scores.reshape(-1, self.n_tasks).to(x_.device)
         for i in range(self.n_tasks):
             loss += torch.nn.functional.mse_loss(x_[:, i], y_[:, i], reduction='mean')
         loss /= self.n_tasks
-        return loss
+        return x, loss
 
 
     @property
@@ -223,11 +223,11 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         else:
             loss = torch.tensor(0.0).to(x.device)
         x_ = x.reshape(-1, self.n_tasks)
-        y_ = scores.reshape(-1, self.n_tasks)
+        y_ = scores.reshape(-1, self.n_tasks).to(x_.device)
         for i in range(self.n_tasks):
             loss += torch.nn.functional.mse_loss(x_[:, i], y_[:, i], reduction='mean')
         loss /= self.n_tasks
-        return loss
+        return x, loss
 
 class FiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config, device='cpu'):
