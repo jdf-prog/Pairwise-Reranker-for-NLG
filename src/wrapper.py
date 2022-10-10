@@ -48,9 +48,10 @@ class DualEncoderWrapper(torch.nn.Module):
         self.source_cls_embedding = None
         self.candidate_cls_embedding = None
         self.preds = None
+        self.aux_loss = None
         self.n_tasks = n_tasks
         self.d_model = d_model
-        self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
+        # self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
         self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
 
     def reduce_padding(self, input_ids, attention_mask):
@@ -77,11 +78,13 @@ class DualEncoderWrapper(torch.nn.Module):
             candidate_cls_embed
         ), dim=-1)
         # save the pred scores for loss computation
-        preds= self.multi_task_layer(inputs)
+        preds, aux_loss = self.multi_task_layer(inputs)
         if self.preds is None:
             self.preds = preds
+            self.aux_loss = aux_loss
         else:
             self.preds = torch.cat((self.preds, preds), dim=0)
+            self.aux_loss += aux_loss
 
         # change the scores to rank
         ranks = torch.argsort(preds, dim=1).type(torch.float) # lower score get worse and lower rank
@@ -175,11 +178,12 @@ class DualEncoderWrapper(torch.nn.Module):
         self.candidate_cls_embedding = None
         return result
 
-    def get_pred_scores(self):
+    def get_multi_task_layer_output(self):
         if self.preds is None:
             raise ValueError("preds is not set, please run forward first")
-        result = self.preds
+        result = (self.preds, self.aux_loss)
         self.preds = None
+        self.aux_loss = None
         return result
 
 
@@ -260,7 +264,7 @@ class ModelMultitaskRegression(nn.Module):
         x = self.gelu(x)
         x = self.linear2(x)
         x = self.sigmoid(x) # do regression on [0, 1] scale
-        return x
+        return x, None # no loss
 
 
 class MoERegression(nn.Module):
@@ -300,11 +304,12 @@ class MoERegression(nn.Module):
     def forward(self, x):
         _, n_candidate, _ = x.size()
         pred_scores = []
+        total_aux_loss = torch.tensor(0.0, device=x.device)
         for i in range(n_candidate):
             encs = x[:, i, :] # [CLS]
             preds_i = self.fc2(self.relu(self.fc1(encs))) # shared bottom
             train = self.training
-            preds_i, _ = self.moe(preds_i, train = train, collect_gates = not(train))
+            preds_i, aux_loss = self.moe(preds_i, train = train, collect_gates = not(train))
             pred_scores_i = []
             for j in range(self.n_tasks):
                 # pred
@@ -313,5 +318,6 @@ class MoERegression(nn.Module):
                 pred_scores_i.append(pred_scors_i_j)
             pred_scores_i = torch.stack(pred_scores_i, dim=1)
             pred_scores.append(pred_scores_i)
+            total_aux_loss += aux_loss
         pred_scores = torch.stack(pred_scores, dim=1)
-        return pred_scores
+        return pred_scores, total_aux_loss

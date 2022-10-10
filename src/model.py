@@ -98,10 +98,13 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         """
         Compute the auxiliary loss
         """
-        x = self.encoder.get_pred_scores()
+        x, aux_loss = self.encoder.get_multi_task_layer_output()
         y = scores.to(x.device)
         # compute the loss
-        loss = torch.tensor(0.0).to(x.device)
+        if aux_loss is not None:
+            loss = torch.tensor(aux_loss).to(x.device)
+        else:
+            loss = torch.tensor(0.0).to(x.device)
         x_ = x.reshape(-1,self.n_tasks)
         y_ = y.reshape(-1,self.n_tasks)
         for i in range(self.n_tasks):
@@ -181,10 +184,13 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         """
         Compute the auxiliary loss
         """
-        x = self.encoder.get_pred_scores()
+        x, aux_loss = self.encoder.get_multi_task_layer_output()
         y = scores.to(x.device)
         # compute the loss
-        loss = torch.tensor(0.0).to(x.device)
+        if aux_loss is not None:
+            loss = torch.tensor(aux_loss).to(x.device)
+        else:
+            loss = torch.tensor(0.0).to(x.device)
         x_ = x.reshape(-1,self.n_tasks)
         y_ = y.reshape(-1,self.n_tasks)
         for i in range(self.n_tasks):
