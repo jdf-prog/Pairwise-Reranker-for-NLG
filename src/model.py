@@ -180,7 +180,12 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
         self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id)
         self.decoder = DualT5DecoderWrapper(self.decoder)
-        self.multi_task_layer = ModelMultitaskRegression(
+        # self.multi_task_layer = ModelMultitaskRegression(
+        #     self.n_tasks,
+        #     self.config.d_model*2,
+        #     self.config.d_model
+        # )
+        self.multi_task_layer = MoERegression(
             self.n_tasks,
             self.config.d_model*2,
             self.config.d_model
