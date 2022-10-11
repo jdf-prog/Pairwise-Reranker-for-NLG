@@ -46,14 +46,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         if attention_mask != None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
 
-        # generate decoder input_ids from labels instead of input_ids
-        if labels is None:
-            decoder_input_ids = None
-        else:
-            decoder_input_ids = shift_tokens_right(
-                labels if labels is not None else input_ids,
-                self.config.pad_token_id,
-                self.config.decoder_start_token_id)
         return super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
