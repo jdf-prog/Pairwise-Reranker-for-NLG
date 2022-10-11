@@ -5,4 +5,6 @@ nltk
 rouge_score
 torchmetrics
 wandb
-apex
+scipy
+sentencepiece
+pytorch-metric-learning

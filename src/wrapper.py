@@ -7,6 +7,7 @@ from scipy.stats import pearsonr
 import torch.nn.functional as F
 from src.model_moe import MoE, MLPTower
 import numpy as np
+from pytorch_metric_learning import losses, miners, distances
 
 class EncoderWrapper(torch.nn.Module):
     """
@@ -51,8 +52,6 @@ class DualEncoderWrapper(torch.nn.Module):
         self.aux_loss = None
         self.n_tasks = n_tasks
         self.d_model = d_model
-        # self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
-        self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
 
     def reduce_padding(self, input_ids, attention_mask):
         """
@@ -65,7 +64,7 @@ class DualEncoderWrapper(torch.nn.Module):
         reduced_length = input_ids.size(1)
         return input_ids, attention_mask, reduced_length
 
-    def select_topk(self, topk=3):
+    def select_topk(self, topk=1):
         """
         Select the topk candidates from the candidates
         Returns:
@@ -73,24 +72,18 @@ class DualEncoderWrapper(torch.nn.Module):
         """
         source_cls_embed, candidate_cls_embed = self.get_cls_embed()
         bzs, n_candidates, d_model = candidate_cls_embed.size()
-        inputs = torch.cat((
-            source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
-            candidate_cls_embed
-        ), dim=-1)
-        # save the pred scores for loss computation
-        preds, aux_loss = self.multi_task_layer(inputs)
+        # save the pred similarity
+        sim = torch.bmm(source_cls_embed.unsqueeze(1), candidate_cls_embed.transpose(1, 2)).sequeeze(1) # [batch_size, n_candidate]
+        preds = sim
         if self.preds is None:
             self.preds = preds
-            self.aux_loss = aux_loss
+            self.aux_loss = 0
         else:
             self.preds = torch.cat((self.preds, preds), dim=0)
-            self.aux_loss += aux_loss
+            self.aux_loss += 0
 
-        # change the scores to rank
-        ranks = torch.argsort(preds, dim=1).type(torch.float) # lower score get worse and lower rank
-        assert ranks.shape == (bzs, n_candidates, self.n_tasks)
         # select the index of the one with the top khigghest average rank
-        _, indices = torch.topk(torch.mean(ranks, dim=-1), k=topk, dim=-1)
+        _, indices = torch.topk(preds, k=topk, dim=-1)
         return indices
 
 

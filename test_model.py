@@ -70,18 +70,24 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
             if (i + 1) % opt.eval_print_freq == 0:
                 log = f'Process rank:{opt.global_rank}, {i+1} / {len(dataloader)}'
                 result = {
-                    'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
-                    'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
-                    'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+                    'rouge1_sel': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
+                    'rouge2_sel': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
+                    'rougeL_sel': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+                    'rouge1_gen': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_gen]),
+                    'rouge2_gen': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_gen]),
+                    'rougeL_gen': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_gen]),
                 }
                 for k, v in result.items():
                     log += f' |\n {k} = {v:.3f}'
                 logger.warning(log)
     log = f'Process rank:{opt.global_rank}, final result'
     result = {
-        'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
-        'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
-        'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+        'rouge1_sel': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
+        'rouge2_sel': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
+        'rougeL_sel': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+        'rouge1_gen': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_gen]),
+        'rouge2_gen': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_gen]),
+        'rougeL_gen': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_gen]),
     }
     for k, v in result.items():
         log += f' |\n {k} = {v:.3f}'
