@@ -11,9 +11,9 @@ NGPU=1
 train_data_path="./data/cnn_dailymail_train_hypo.jsonl"
 dev_data_path="./data/cnn_dailymail_val_hypo_min.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
-model_type='dualbart'
-model_size="large"
-name="basic"
+model_type='dualt5'
+model_size="base"
+name="debug"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 
 if [ ${model_type} == 't5' ]; then
@@ -56,8 +56,4 @@ python \
         --n_candidate 6 \
         --total_step 10000 \
         --warmup_step 2000 \
-        --main_port 19003 \
-        --use_aux_loss \
-        --source_encoder_lr 0.00005 \
-        --candidate_encoder_lr 0.0005 \
-        --decoder_lr 0.00005 \
+        --main_port 19004 \

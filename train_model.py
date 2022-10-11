@@ -159,29 +159,23 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                 num_beams=opt.num_beams,
                 min_length=opt.min_length,
             )
-
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                preds, aux_loss = model.module.compute_auxiliary_loss(scores)
-            else:
-                preds, aux_loss = model.compute_auxiliary_loss(scores)
-
-            for k, pred in enumerate(preds):
-                select_idx = torch.argmax(torch.sum(pred, dim=-1))
-                ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
-                gold = dataset.get_example(idx[k])['target']
-                score = rouge_score(ans, gold)
-                rouge_scores_sel.append(score)
+            if opt.use_aux_loss:
+                if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                    preds, aux_loss = model.module.compute_auxiliary_loss(scores)
+                else:
+                    preds, aux_loss = model.compute_auxiliary_loss(scores)
+                for k, pred in enumerate(preds):
+                    select_idx = torch.argmax(torch.sum(pred, dim=-1))
+                    ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
+                    gold = dataset.get_example(idx[k])['target']
+                    score = rouge_score(ans, gold)
+                    rouge_scores_sel.append(score)
             for k, o in enumerate(outputs):
                 ans = tokenizer.decode(o, skip_special_tokens=True)
                 gold = dataset.get_example(idx[k])['target']
                 score = rouge_score(ans, gold)
                 rouge_scores_gen.append(score)
     result = {
-        "sel":{
-            'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
-            'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
-            'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
-        },
         "gen": {
             'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_gen]),
             'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_gen]),
@@ -189,6 +183,14 @@ def evaluate(model, dataset, tokenizer, collator, opt):
         },
         "dev_score": np.mean([r['rouge2_fmeasure'] for r in rouge_scores_gen]),
     }
+    if opt.use_aux_loss:
+        result.update({
+            "sel":{
+                'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
+                'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
+                'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+            }})
+
     return result
 
 if __name__ == "__main__":
