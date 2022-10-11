@@ -273,6 +273,7 @@ if __name__ == "__main__":
     if not checkpoint_exists and opt.model_path == "none":
         hf_model = hf_model_class.from_pretrained(model_name)
         hf_model.config.n_tasks = opt.n_tasks
+        hf_model.config.use_aux_loss = opt.use_aux_loss
         model = model_class(hf_model.config)
         model.load_hfm(hf_model.state_dict())
         model = model.to(opt.local_rank)
