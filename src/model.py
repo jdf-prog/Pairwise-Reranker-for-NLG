@@ -20,7 +20,6 @@ from src.wrapper import (
     ModelMultitaskRegression,
     MoERegression
 )
-from transformers.models.bart.modeling_bart import shift_tokens_right
 class DualFiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config):
         super().__init__(config)
@@ -75,7 +74,7 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
         self.model.encoder = DualEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx)
         self.model.decoder = DualDecoderWrapper(self.model.decoder)
-        self.multi_task_layer = ModelMultitaskRegression(
+        self.multi_task_layer = MoERegression(
             self.n_tasks,
             self.model.config.d_model*2,
             self.model.config.d_model,
@@ -174,11 +173,6 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
         self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id)
         self.decoder = DualDecoderWrapper(self.decoder)
-        # self.multi_task_layer = ModelMultitaskRegression(
-        #     self.n_tasks,
-        #     self.config.d_model*2,
-        #     self.config.d_model
-        # )
         self.multi_task_layer = MoERegression(
             self.n_tasks,
             self.config.d_model*2,
@@ -248,12 +242,6 @@ class FiDBART(transformers.BartForConditionalGeneration):
             input_ids = input_ids.view(input_ids.size(0), -1)
         if attention_mask != None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
-
-        # generate decoder input_ids from labels instead of input_ids
-        decoder_input_ids = shift_tokens_right(
-            labels,
-            self.config.pad_token_id,
-            self.config.decoder_start_token_id)
         return super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,

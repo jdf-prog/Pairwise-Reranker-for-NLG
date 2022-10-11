@@ -1,8 +1,7 @@
 numpy
-transformers
+transformers==4.10.0
 tensorboard
 nltk
 rouge_score
 torchmetrics
 wandb
-apex

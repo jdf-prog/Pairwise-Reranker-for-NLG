@@ -52,9 +52,12 @@ python \
         --optim adamw \
         --scheduler linear \
         --weight_decay 0.001 \
-        --per_gpu_batch_size 2 \
+        --per_gpu_batch_size 1 \
         --n_candidate 6 \
-        --total_step 25000 \
-        --warmup_step 3000 \
+        --total_step 10000 \
+        --warmup_step 2000 \
         --main_port 19003 \
         --use_aux_loss \
+        --source_encoder_lr 0.00005 \
+        --candidate_encoder_lr 0.0005 \
+        --decoder_lr 0.00005 \
