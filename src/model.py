@@ -19,7 +19,6 @@ from src.wrapper import (
     DualEncoderWrapper,
     DualDecoderWrapper,
 )
-from transformers.models.bart.modeling_bart import shift_tokens_right
 class DualFiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config):
         super().__init__(config)
@@ -218,11 +217,6 @@ class FiDBART(transformers.BartForConditionalGeneration):
         if attention_mask != None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
 
-        # generate decoder input_ids from labels instead of input_ids
-        decoder_input_ids = shift_tokens_right(
-            labels,
-            self.config.pad_token_id,
-            self.config.decoder_start_token_id)
         return super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
