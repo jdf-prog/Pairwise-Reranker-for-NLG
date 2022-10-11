@@ -165,11 +165,15 @@ def check_scores(examples):
     """
         Check the upper bound of the scores and print it
     """
+    n_candidate = len(examples[0]['candidates'])
     task_names = list(examples[0]['candidates'][0]['score'].keys())
     max_scores = {task:[] for task in task_names}
     for example in examples:
         for task in task_names:
             max_scores[task].append(max([c['score'][task] for c in example['candidates']]))
+    candidate_scores = {task:[np.mean([ex['candidates'][i]['score'][task] for ex in examples]) for i in range(n_candidate)] for task in task_names}
     for task in task_names:
         print(f"Selection Upper bound for task '{task}' is {np.mean(max_scores[task])}")
+    for task in task_names:
+        print(f"Candidate mean scores for task '{task}' are {candidate_scores[task]}")
 

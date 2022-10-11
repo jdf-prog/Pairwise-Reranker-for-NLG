@@ -138,36 +138,7 @@ class DualEncoderWrapper(torch.nn.Module):
         self.source_cls_embedding = None
         self.candidate_cls_embedding = None
         return result
-
-class DualBartDecoderWrapper(torch.nn.Module):
-    """
-    Decoder Wrapper to assist the DualEncoderWrapper
-    """
-    def __init__(self, decoder):
-        super().__init__()
-        self.decoder = decoder
-
-    def forward(self,
-        input_ids,
-        encoder_hidden_states,
-        encoder_padding_mask,
-        decoder_padding_mask,
-        **kwargs):
-        """
-            adjust the encoder padding mask to fit the padding reduce during the encoding
-        """
-        # After the reduce, no padding existing in the encoder_hidden_states
-        # So the encoder padding mask is all True, i.e. all attending
-        encoder_padding_mask = torch.ones_like(encoder_hidden_states[:, :, 0]).bool()
-        return self.decoder(
-            input_ids,
-            encoder_hidden_states,
-            encoder_padding_mask,
-            decoder_padding_mask,
-            **kwargs
-        )
-
-class DualT5DecoderWrapper(torch.nn.Module):
+class DualDecoderWrapper(torch.nn.Module):
     """
     Decoder Wrapper to assist the DualEncoderWrapper
     """
