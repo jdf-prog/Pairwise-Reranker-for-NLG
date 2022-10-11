@@ -77,10 +77,10 @@ class DualEncoderWrapper(torch.nn.Module):
         preds = sim
         if self.preds is None:
             self.preds = preds
-            self.aux_loss = 0
+            self.aux_loss = 0.
         else:
             self.preds = torch.cat((self.preds, preds), dim=0)
-            self.aux_loss += 0
+            self.aux_loss += 0.
 
         # select the index of the one with the top khigghest average rank
         _, indices = torch.topk(preds, k=topk, dim=-1)

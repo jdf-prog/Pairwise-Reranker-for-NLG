@@ -98,7 +98,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         else:
             loss = torch.tensor(0.0).to(sim.device)
         e_sim = torch.exp(sim)
-        print(e_sim.shape)
         labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(sim.device)
         e_sim_sum = torch.sum(e_sim, dim=1)
         # select a positive sample for each task and compute the loss
@@ -187,7 +186,6 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         else:
             loss = torch.tensor(0.0).to(sim.device)
         e_sim = torch.exp(sim)
-        print(e_sim.shape)
         labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(sim.device)
         e_sim_sum = torch.sum(e_sim, dim=1)
         # select a positive sample for each task and compute the loss
