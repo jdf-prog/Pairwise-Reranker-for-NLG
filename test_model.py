@@ -49,7 +49,7 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
                 preds, aux_loss = model.compute_auxiliary_loss(scores)
 
             for k, pred in enumerate(preds):
-                select_idx = torch.argmax(torch.sum(pred, dim=-1))
+                select_idx = torch.argmax(pred)
                 ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
                 example = dataset.get_example(idx[k])
                 gold = example['target']

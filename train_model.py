@@ -165,7 +165,7 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                 else:
                     preds, aux_loss = model.compute_auxiliary_loss(scores)
                 for k, pred in enumerate(preds):
-                    select_idx = torch.argmax(torch.sum(pred, dim=-1))
+                    select_idx = torch.argmax(pred, dim=-1)
                     ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
                     gold = dataset.get_example(idx[k])['target']
                     score = rouge_score(ans, gold)

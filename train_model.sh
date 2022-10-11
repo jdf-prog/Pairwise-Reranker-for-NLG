@@ -56,6 +56,6 @@ python \
         --n_candidate 6 \
         --total_step 25000 \
         --warmup_step 3000 \
-        --main_port 19008 \
+        --main_port 19009 \
         --use_aux_loss \
         --aux_loss_weight 1 \
