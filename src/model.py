@@ -17,8 +17,7 @@ import torch.nn.functional as F
 from src.wrapper import (
     EncoderWrapper,
     DualEncoderWrapper,
-    DualBartDecoderWrapper,
-    DualT5DecoderWrapper,
+    DualDecoderWrapper,
 )
 from transformers.models.bart.modeling_bart import shift_tokens_right
 class DualFiDBART(transformers.BartForConditionalGeneration):
@@ -42,7 +41,7 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         if input_ids != None:
             # inputs might have already be resized in the generate method
             if input_ids.dim() == 3:
-                self.model.encoder.n_ctx = input_ids.size(1) - 1
+                self.model.encoder.n_ctx = input_ids.size(1)
             input_ids = input_ids.view(input_ids.size(0), -1)
         if attention_mask != None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
@@ -79,7 +78,7 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
         self.model.encoder = DualEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx, self.n_tasks, self.config.d_model)
-        self.model.decoder = DualBartDecoderWrapper(self.model.decoder)
+        self.model.decoder = DualDecoderWrapper(self.model.decoder)
 
     def unwrap_model(self):
         """
@@ -165,7 +164,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
         self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id, self.n_tasks, self.config.d_model)
-        self.decoder = DualT5DecoderWrapper(self.decoder)
+        self.decoder = DualDecoderWrapper(self.decoder)
 
     def unwrap_model(self):
         """
