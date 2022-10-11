@@ -11,7 +11,7 @@ dev_data_path="./data/cnn_dailymail_val_hypo.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
 model_type='dualt5'
 model_size="base"
-name="sel_gen"
+name="moe_sel_gen"
 
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 model_path="${checkpoint_dir}/${name}/checkpoint/best_dev"
@@ -47,4 +47,4 @@ python test_model.py \
         --candidate_maxlength ${text_maxlength} \
         --per_gpu_batch_size 2 \
         --n_candidate 6 \
-        --main_port 19003 \
+        --main_port 19001 \

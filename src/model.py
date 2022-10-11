@@ -188,7 +188,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             loss = torch.tensor(0.0).to(sim.device)
         e_sim = torch.exp(sim)
         print(e_sim.shape)
-        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).to(sim.device)
+        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(sim.device)
         e_sim_sum = torch.sum(e_sim, dim=1)
         # select a positive sample for each task and compute the loss
         e_sim_pos_sum = torch.sum(e_sim.unsqueeze(-1).expand(-1, -1, labels.size(-1)) * labels, dim=(1,2))
