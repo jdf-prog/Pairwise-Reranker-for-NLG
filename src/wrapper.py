@@ -73,7 +73,7 @@ class DualEncoderWrapper(torch.nn.Module):
         source_cls_embed, candidate_cls_embed = self.get_cls_embed()
         bzs, n_candidates, d_model = candidate_cls_embed.size()
         # save the pred similarity
-        sim = torch.bmm(source_cls_embed.unsqueeze(1), candidate_cls_embed.transpose(1, 2)).sequeeze(1) # [batch_size, n_candidate]
+        sim = torch.bmm(source_cls_embed.unsqueeze(1), candidate_cls_embed.transpose(1, 2)).squeeze(1) # [batch_size, n_candidate]
         preds = sim
         if self.preds is None:
             self.preds = preds
