@@ -11,7 +11,7 @@ dev_data_path="./data/cnn_dailymail_val_hypo.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
 model_type='dualt5'
 model_size="base"
-name="moe_sel_gen"
+name="sel_gen_BCE"
 
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 model_path="${checkpoint_dir}/${name}/checkpoint/best_dev"

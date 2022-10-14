@@ -8,3 +8,4 @@ wandb
 scipy
 sentencepiece
 pytorch-metric-learning
+prettytable

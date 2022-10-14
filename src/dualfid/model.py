@@ -91,19 +91,15 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         """
         Compute the auxiliary loss
         """
-        sim, aux_loss = self.encoder.get_multi_task_layer_output()
+        x, aux_loss = self.encoder.get_multi_task_layer_output()
         # compute contrastive loss
         if aux_loss is not None:
-            loss = torch.tensor(aux_loss).to(sim.device)
+            loss = torch.tensor(aux_loss).to(x.device)
         else:
-            loss = torch.tensor(0.0).to(sim.device)
-        e_sim = torch.exp(sim)
-        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(sim.device)
-        e_sim_sum = torch.sum(e_sim, dim=1)
-        # select a positive sample for each task and compute the loss
-        e_sim_pos_sum = torch.sum(e_sim.unsqueeze(-1).expand(-1, -1, labels.size(-1)) * labels, dim=(1,2))
-        loss += torch.mean(-torch.log(e_sim_pos_sum / e_sim_sum))
-        return sim, loss
+            loss = torch.tensor(0.0).to(x.device)
+        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
+        loss = F.binary_cross_entropy(x, labels, reduction='mean')
+        return x, loss
 
     @property
     def encoder(self):
@@ -179,19 +175,15 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         Args:
             scores: (batch_size, n_candidates, n_tasks)
         """
-        sim, aux_loss = self.encoder.get_multi_task_layer_output()
+        x, aux_loss = self.encoder.get_multi_task_layer_output()
         # compute contrastive loss
         if aux_loss is not None:
-            loss = torch.tensor(aux_loss).to(sim.device)
+            loss = torch.tensor(aux_loss).to(x.device)
         else:
-            loss = torch.tensor(0.0).to(sim.device)
-        e_sim = torch.exp(sim)
-        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(sim.device)
-        e_sim_sum = torch.sum(e_sim, dim=1)
-        # select a positive sample for each task and compute the loss
-        e_sim_pos_sum = torch.sum(e_sim.unsqueeze(-1).expand(-1, -1, labels.size(-1)) * labels, dim=(1,2))
-        loss += torch.mean(-torch.log(e_sim_pos_sum / e_sim_sum))
-        return sim, loss
+            loss = torch.tensor(0.0).to(x.device)
+        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
+        loss = F.binary_cross_entropy(x, labels, reduction='mean')
+        return x[:,:,2], loss
 
 class FiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config, device='cpu'):

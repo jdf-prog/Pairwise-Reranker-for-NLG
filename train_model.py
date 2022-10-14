@@ -77,6 +77,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             else:
                 aux_loss = 0
                 train_loss = generation_loss
+            train_loss /= opt.accumulation_steps
 
             train_loss.backward()
 

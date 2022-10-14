@@ -13,7 +13,7 @@ dev_data_path="./data/cnn_dailymail_val_hypo_min.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
 model_type='dualt5'
 model_size="base"
-name="bisel_gen_2"
+name="sel_gen_BCE_2"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 
 if [ ${model_type} == 't5' ]; then
@@ -52,10 +52,11 @@ python \
         --optim adamw \
         --scheduler linear \
         --weight_decay 0.001 \
-        --per_gpu_batch_size 2 \
+        --per_gpu_batch_size 3 \
         --n_candidate 6 \
         --total_step 25000 \
         --warmup_step 3000 \
-        --main_port 19009 \
+        --main_port 19010 \
         --use_aux_loss \
-        --aux_loss_weight 1 \
+        --aux_loss_weight 2 \
+        --accumulation_steps 1 \
