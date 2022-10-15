@@ -7,81 +7,15 @@ import prettytable as pt
 import logging as log
 import numpy as np
 import uuid
-
+import multiprocess as mp
+import psutil
 
 from tqdm import tqdm
 from typing import Counter, List, Dict, Tuple, Union, Optional, Set
-from evaluate import load
-from sacrebleu import sentence_bleu
 from collections import Counter
-from absl import logging
-logging.set_verbosity(logging.WARNING)
-
-class Support(object):
-    """
-        a class specify the supports of the baselines
-    """
-    METRICS = ['bleu','bleurt', 'rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bert_score']
-    evaluators = {}
-
-    @staticmethod
-    def check_metric_support(metric: Union[list, str]) -> None:
-        if isinstance(metric, str):
-            metric = [metric]
-        metrics_not_supported = [m for m in metric if m not in Support.METRICS]
-        if len(metrics_not_supported) > 0:
-            raise ValueError(f"Metrics {metrics_not_supported} not supported")
-
-    @staticmethod
-    def get_supported_metrics():
-        return Support.METRICS
-
-    @staticmethod
-    def add_custom_metric(name, metric):
-        """
-        You can add a costom designed metric.
-        The function should be of form 'metric(hypotheses, references) -> List[float]'
-        """
-        if name in Support.METRICS:
-            raise ValueError("Metric {} is already supported".format(name))
-        Support.METRICS.append(name)
-        Support.evaluators[name] = metric
-
-    @staticmethod
-    def evaluate(hypothesis:str, reference:str, metric='bleu') -> Tuple[float]:
-        """
-        Evaluate the hypothesis and reference using the metric.
-
-        Args:
-            hypothesis: the hypothesis
-            reference: the reference
-            metric: the metric to be used. Support hugging face evaluate metric modules.
-        """
-        if metric == 'bleu':
-            return sentence_bleu(hypothesis, [reference]).score
-        elif metric == 'bleurt':
-            if 'bleurt' not in Support.evaluators:
-                Support.evaluators['bleurt'] = load('bleurt')
-            result = Support.evaluators['bleurt'].compute(predictions=[hypothesis], references=[reference])
-            return result['scores'][0]
-        elif metric in ['rouge1', 'rouge2', 'rougeL', 'rougeLsum']:
-            if 'rouge' not in Support.evaluators:
-                Support.evaluators['rouge'] = load('rouge')
-            result = Support.evaluators['rouge'].compute(predictions=[hypothesis], references=[reference], rouge_types=[metric])
-            return result[metric]
-        elif metric == 'bert_score':
-            if 'bert_score' not in Support.evaluators:
-                Support.evaluators['bert_score'] = load('bertscore')
-            result = Support.evaluators['bert_score'].compute(predictions=[hypothesis], references=[reference], lang='en')
-            return result['f1'][0]
-        elif metric in Support.METRICS:
-            return Support.evaluators[metric]([hypothesis], [reference])[0]
-        else:
-            if metric not in Support.evaluators:
-                raise ValueError("Metric {} is not supported".format(metric))
-            return Support.evaluators[metric]([hypothesis], [reference])[0]
-
-
+from common.evaluation import (
+    Support
+)
 class CustomDataset:
 
     def __init__(self, items:dict={}, file:str=None):
@@ -97,13 +31,33 @@ class CustomDataset:
         self._set_logger()
         self.self_check()
 
-    def prepare_metrics(self, metrics:List[str]=None):
+    def _prepare_metrics(self, items:List[Dict], metrics:List[str]=None):
         """
         prepare the dataset for reranking.
         This function computes all the metrics value of each candidate for each source.
 
         Args:
             metrics: the metrics to be used.
+        """
+        evaluator = Support()
+        s = psutil.Process(os.getpid())
+        current_cpu_number = s.cpu_num()
+        for item in tqdm(items, desc="Computing metrics on CPU {}".format(current_cpu_number)):
+            for cand in item['candidates']:
+                for metric in metrics:
+                    # only compute the metric if it is not computed yet
+                    if metric not in cand['scores']:
+                        cand['scores'][metric] = evaluator.evaluate(hypothesis=cand['text'], reference=item['target'], metric=metric)
+        return items
+
+    def prepare_metrics(self, metrics:List[str]=None, num_workers=1):
+        """
+        prepare the dataset for reranking.
+        This function computes all the metrics value of each candidate for each source.
+
+        Args:
+            metrics: the metrics to be used.
+            num_workers: the number of workers to be used for computing the metrics.
         """
         self.logger.info('Preparing metrics...')
         # if metrics is not specified, use 'bleu' by default
@@ -117,15 +71,22 @@ class CustomDataset:
         prepared_metrics = self.prepared_metrics
         metrics_to_prepare = set(metrics) - set(prepared_metrics)
 
+
         self.logger.info("Metrics {} already prepared.".format(prepared_metrics))
         self.logger.info("Metrics {} will be prepared.".format(metrics_to_prepare))
         # evaluate and record the metric values
-        for item in tqdm(self.items, desc=f'Preparing metrics',):
-            for cand in item['candidates']:
-                for metric in metrics_to_prepare:
-                    # only compute the metric if it is not computed yet
-                    if metric not in cand['scores']:
-                        cand['scores'][metric] = Support.evaluate(hypothesis=cand['text'], reference=item['target'], metric=metric)
+        chunks = np.array_split(self.items, num_workers)
+        current_cpu_cores = mp.cpu_count()
+        self.logger.info(f"Current CPU cores: {current_cpu_cores}")
+        if num_workers > current_cpu_cores:
+            self.logger.warning(f"Number of workers ({num_workers}) is larger than number of cpu cores ({current_cpu_cores}).")
+        self.logger.info(f"Using {min(num_workers, current_cpu_cores)} workers to compute metrics...")
+        num_workers = min(num_workers, current_cpu_cores)
+        with mp.Pool(num_workers) as pool:
+            results = [pool.apply_async(self._prepare_metrics, args=(chunk, metrics_to_prepare)) for chunk in chunks]
+            results = [p.get() for p in results]
+            self.items = [item for sublist in results for item in sublist]
+
         self.logger.info('Finish preparing metrics {}.'.format(metrics_to_prepare))
         self.logger.info('The current available metrics are {}'.format(self.prepared_metrics))
 
@@ -202,7 +163,7 @@ class CustomDataset:
         load the dataset from a jsonl file
         """
         with open(file, 'r') as f:
-            items = [json.loads(line) for line in f.readlines()][:1000] # debug
+            items = [json.loads(line) for line in f.readlines()]
         ds = CustomDataset(items, file)
         ds.logger.info(f"Dataset loaded from josnline file '{file}'")
         return ds
@@ -324,32 +285,70 @@ class CustomDataset:
         metrics.sort()
 
         table = pt.PrettyTable()
-        fields = ['models']
-        fields.extend(metrics)
+        fields = ['models', 'generation method']
+        fields.extend([f"{metric}: top beam (min - mean - max)" for metric in metrics])
         table.field_names = fields
         table.align = 'l'
         # add original sources performances to the table
-
+        rows = []
         types = set([(candidate['model'], candidate['generation_method']) for candidate in self.items[0]['candidates']])
+
+        # 1. add oracle performances to the table for each model and generation method
         for model, generation_method in types:
-            # add oracle performances to the table for each model and generation method
+            top_beam_scores = {metric: [] for metric in metrics}
             mean_scores = {metric: [] for metric in metrics}
             max_scores = {metric: [] for metric in metrics}
             min_scores = {metric: [] for metric in metrics}
             for item in self.items:
                 candidates = [cand for cand in item['candidates'] if cand['model'] == model and cand['generation_method'] == generation_method]
                 for metric in metrics:
+                    top_beam_scores[metric].append(candidates[0]['scores'][metric])
                     mean_score = np.mean([cand['scores'][metric] for cand in candidates])
                     max_score = max([cand['scores'][metric] for cand in candidates])
                     min_score = min([cand['scores'][metric] for cand in candidates])
                     mean_scores[metric].append(mean_score)
                     max_scores[metric].append(max_score)
                     min_scores[metric].append(min_score)
-            row = [f"{model} ({generation_method})"]
+            row = [model, generation_method]
             for metric in metrics:
+                top_beam_score = np.mean(top_beam_scores[metric])
                 mean_score = np.mean(mean_scores[metric])
                 max_score = np.mean(max_scores[metric])
                 min_score = np.mean(min_scores[metric])
-                row.append(f"{mean_score:.3f} ({min_score:.3f} - {max_score:.3f})")
-            table.add_row(row)
+                row.append(f"{top_beam_score:.3f} ({min_score:.3f} - {mean_score:.3f} - {max_score:.3f})")
+            rows.append(row)
+
+        # 2. add oracle performances to the table for each model using all generation methods
+        model_counts = Counter()
+        for model in [t[0] for t in types]:
+            model_counts[model] += 1
+        for model in set([t[0] for t in types]):
+            if model_counts[model] == 1:
+                continue
+            top_beam_scores = {metric: [] for metric in metrics}
+            mean_scores = {metric: [] for metric in metrics}
+            max_scores = {metric: [] for metric in metrics}
+            min_scores = {metric: [] for metric in metrics}
+            for item in self.items:
+                candidates = [cand for cand in item['candidates'] if cand['model'] == model]
+                for metric in metrics:
+                    top_beam_scores[metric].append(candidates[0]['scores'][metric])
+                    mean_score = np.mean([cand['scores'][metric] for cand in candidates])
+                    max_score = max([cand['scores'][metric] for cand in candidates])
+                    min_score = min([cand['scores'][metric] for cand in candidates])
+                    mean_scores[metric].append(mean_score)
+                    max_scores[metric].append(max_score)
+                    min_scores[metric].append(min_score)
+            row = [model, "all"]
+            for metric in metrics:
+                top_beam_score = np.mean(top_beam_scores[metric])
+                mean_score = np.mean(mean_scores[metric])
+                max_score = np.mean(max_scores[metric])
+                min_score = np.mean(min_scores[metric])
+                row.append(f"{top_beam_score:.3f} ({min_score:.3f} - {mean_score:.3f} - {max_score:.3f})")
+            rows.append(row)
+
+        rows.sort(key=lambda x: x[0])
+        table.add_rows(rows)
+        self.logger.info(f"Oracle Analysis Resutls:\n{table}")
         return table

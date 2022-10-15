@@ -5,22 +5,22 @@
 # LICENSE file in the root directory of this source tree.
 
 import time
+import os
 import sys
 import torch
 import transformers
 import numpy as np
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler, DistributedSampler, SequentialSampler
-from src.options import Options
 from torchmetrics.text.rouge import ROUGEScore
 import wandb
 import os
 import pprint
-
-import src.slurm
-import src.util
-import src.data
-import src.model
+import src.dualfid.slurm
+import src.dualfid.util
+import src.dualfid.data
+import src.dualfid.model
+from src.dualfid.options import Options
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -60,11 +60,11 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
         for i, batch in enumerate(train_dataloader):
             step += 1
 
-            (index, target_ids, target_mask, context_ids, context_masks, scores) = batch
+            (index, target_ids, target_mask, context_ids, context_mask, scores) = batch
             # compute the generation loss
             generation_loss = model(
                 input_ids=context_ids.cuda(),
-                attention_mask=context_masks.cuda(),
+                attention_mask=context_mask.cuda(),
                 labels=target_ids.cuda()
             )[0]
             # compute the mutli-task auxiliary loss, for this batch
@@ -87,7 +87,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 scheduler.step()
                 model.zero_grad()
 
-            train_loss = src.util.average_main(train_loss, opt)
+            train_loss = src.dualfid.util.average_main(train_loss, opt)
             curr_loss += train_loss
 
             if step % opt.eval_freq == 0:
@@ -98,7 +98,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 if opt.is_main:
                     if dev_score > best_dev_score:
                         best_dev_score = dev_score
-                        src.util.save(model, optimizer, scheduler, step, best_dev_score,
+                        src.dualfid.util.save(model, optimizer, scheduler, step, best_dev_score,
                                   opt, checkpoint_path, 'best_dev')
                     log = f"{step} / {opt.total_steps} |"
                     log += f"train: {curr_loss/opt.eval_freq:.3f} |"
@@ -131,7 +131,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 wandb.log(wandb_log, step=step)
 
             if opt.is_main and step % opt.save_freq == 0:
-                src.util.save(model, optimizer, scheduler, step, best_dev_score,
+                src.dualfid.util.save(model, optimizer, scheduler, step, best_dev_score,
                           opt, checkpoint_path, f"step-{step}")
             if step > opt.total_steps:
                 break
@@ -166,7 +166,8 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                 else:
                     preds, aux_loss = model.compute_auxiliary_loss(scores)
                 for k, pred in enumerate(preds):
-                    select_idx = torch.argmax(pred, dim=-1)
+                    assert pred.dim() == 1
+                    select_idx = torch.argmax(pred)
                     ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
                     gold = dataset.get_example(idx[k])['target']
                     score = rouge_score(ans, gold)
@@ -201,11 +202,11 @@ if __name__ == "__main__":
     #opt = options.get_options(use_reader=True, use_optim=True)
 
     torch.manual_seed(opt.seed)
-    src.slurm.init_distributed_mode(opt)
-    src.slurm.init_signal_handler()
+    src.dualfid.slurm.init_distributed_mode(opt)
+    src.dualfid.slurm.init_signal_handler()
 
     checkpoint_path = Path(opt.checkpoint_dir)/opt.name
-    checkpoint_exists = checkpoint_path.exists()
+    checkpoint_exists = (checkpoint_path / 'checkpoint' / 'latest').exists()
     if opt.is_distributed:
         print(f"rank {opt.global_rank} is waiting for barrier")
         torch.distributed.barrier()
@@ -215,28 +216,28 @@ if __name__ == "__main__":
     #    options.print_options(opt)
     #checkpoint_path, checkpoint_exists = util.get_checkpoint_path(opt)
 
-    logger = src.util.init_logger(
+    logger = src.dualfid.util.init_logger(
         opt.is_main,
         opt.is_distributed,
         checkpoint_path / 'run.log'
     )
 
     # use golbal rank and world size to split the eval set on multiple gpus
-    train_examples = src.data.load_data(
+    train_examples = src.dualfid.data.load_data(
         opt.train_data,
         global_rank=opt.global_rank,
         world_size=opt.world_size,
         n_tasks=opt.n_tasks,
     )
-    train_dataset = src.data.Dataset(train_examples, opt.n_candidate)
+    train_dataset = src.dualfid.data.Dataset(train_examples, opt.n_candidate)
     # use golbal rank and world size to split the eval set on multiple gpus
-    eval_examples = src.data.load_data(
+    eval_examples = src.dualfid.data.load_data(
         opt.eval_data,
         global_rank=opt.global_rank,
         world_size=opt.world_size,
         n_tasks=opt.n_tasks,
     )
-    eval_dataset = src.data.Dataset(eval_examples, opt.n_candidate)
+    eval_dataset = src.dualfid.data.Dataset(eval_examples, opt.n_candidate)
     assert train_dataset.n_tasks == eval_dataset.n_tasks
     opt.n_tasks = train_dataset.n_tasks
 
@@ -244,28 +245,28 @@ if __name__ == "__main__":
     model_name = opt.model_type + '-' + opt.model_size
     if opt.model_type == 't5':
         model_name = "t5-" + opt.model_size
-        model_class = src.model.FiDT5
+        model_class = src.dualfid.model.FiDT5
         hf_model_class = transformers.T5ForConditionalGeneration
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
-        collator = src.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == "dualt5":
         model_name = "t5-" + opt.model_size
-        model_class = src.model.DualFiDT5
+        model_class = src.dualfid.model.DualFiDT5
         hf_model_class = transformers.T5ForConditionalGeneration
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
-        collator = src.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'bart':
         model_name = "facebook/bart-" + opt.model_size
-        model_class = src.model.FiDBART
+        model_class = src.dualfid.model.FiDBART
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
-        collator = src.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == "dualbart":
         model_name = "facebook/bart-" + opt.model_size
-        model_class = src.model.DualFiDBART
+        model_class = src.dualfid.model.DualFiDBART
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
-        collator = src.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     else:
         raise NotImplementedError
 
@@ -278,16 +279,16 @@ if __name__ == "__main__":
         model = model_class(hf_model.config)
         model.load_hfm(hf_model.state_dict())
         model = model.to(opt.local_rank)
-        optimizer, scheduler = src.util.set_optim(opt, model)
+        optimizer, scheduler = src.dualfid.util.set_optim(opt, model)
         step, best_dev_score = 0, 0.0
     elif opt.model_path == "none":
         load_path = checkpoint_path / 'checkpoint' / 'latest'
         model, optimizer, scheduler, opt_checkpoint, step, best_dev_score = \
-            src.util.load(model_class, load_path, opt, reset_params=False)
+            src.dualfid.util.load(model_class, load_path, opt, reset_params=False)
         logger.info(f"Model loaded from {load_path}")
     else:
         model, optimizer, scheduler, opt_checkpoint, step, best_dev_score = \
-            src.util.load(model_class, opt.model_path, opt, reset_params=True)
+            src.dualfid.util.load(model_class, opt.model_path, opt, reset_params=True)
         logger.info(f"Model loaded from {opt.model_path}")
 
 

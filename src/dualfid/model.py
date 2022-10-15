@@ -8,16 +8,19 @@
 # https://github.com/facebookresearch/FiD
 # We thank the authors for their great work.
 
+import sys
 import transformers
 import torch
 import torch.nn as nn
 import numpy as np
 import copy
 import torch.nn.functional as F
-from src.wrapper import (
-    EncoderWrapper,
-    DualEncoderWrapper,
-    DualDecoderWrapper,
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from dualfid.wrapper import (
+    FiDEncoderWrapper,
+    DualFiDEncoderWrapper,
+    DualFiDDecoderWrapper,
 )
 class DualFiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config):
@@ -25,18 +28,17 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         self.n_tasks = config.n_tasks
         self.wrap_model()
 
-    # We need to resize as B x (N * L) instead of (B * N) x L here
-    # because the BART forward method uses the input tensors to infer
-    # dimensions used in the decoder.
-    # EncoderWrapper resizes the inputs as (B * N) x L.
     def forward(
         self,
         input_ids=None,
         attention_mask=None,
-        labels=None,
         decoder_input_ids=None,
         decoder_attention_mask=None,
+        labels=None,
         **kwargs):
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor):
+                print(k, v.size() if v is not None else None)
         if input_ids != None:
             # inputs might have already be resized in the generate method
             if input_ids.dim() == 3:
@@ -54,7 +56,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             **kwargs
         )
 
-    # We need to resize the inputs here, as the generate method expect 2D tensors
     def generate(self, input_ids, attention_mask, max_length, **kwargs):
         self.model.encoder.n_ctx = input_ids.size(1)
         return super().generate(
@@ -64,15 +65,19 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             **kwargs
         )
 
+    def get_encoder_attention_masks(self):
+        return self.encoder.get_attention_mask_for_decoder()
+
     def wrap_model(self):
         """
-        Wrap the model's encoder, decoder with EncoderWrapper, DecoderWrapper.
+        Wrap the model's encoder, decoder with DualFIDEncoderWrapper, FualFIDDecoderWrapper.
         """
         encoder1 = self.model.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.model.encoder = DualEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx, self.n_tasks, self.config.d_model)
-        self.model.decoder = DualDecoderWrapper(self.model.decoder)
+        self.model.encoder = DualFiDEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx, self.n_tasks, self.config.d_model)
+        self.model.decoder = DualFiDDecoderWrapper(self.model.decoder, self.get_encoder_attention_masks)
+
 
     def unwrap_model(self):
         """
@@ -90,8 +95,16 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
     def compute_auxiliary_loss(self, scores):
         """
         Compute the auxiliary loss
+        Args:
+            scores: [batch_size, n_candidates, n_tasks]
+        Returns:
+            pred_scores: [batch_size, n_candidates]
+                the aggregated prediction score for direct selction
+            loss: torch.Tensor, float loss
         """
         x, aux_loss = self.encoder.get_multi_task_layer_output()
+        scores = scores.to(x.device)
+        assert x.shape == scores.shape
         # compute contrastive loss
         if aux_loss is not None:
             loss = torch.tensor(aux_loss).to(x.device)
@@ -99,7 +112,48 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             loss = torch.tensor(0.0).to(x.device)
         labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
         loss = F.binary_cross_entropy(x, labels, reduction='mean')
-        return x, loss
+        return torch.sum(x, dim=-1), loss
+
+    def prepare_inputs_for_generation(
+        self,
+        decoder_input_ids,
+        past=None,
+        attention_mask=None,
+        head_mask=None,
+        decoder_head_mask=None,
+        cross_attn_head_mask=None,
+        use_cache=None,
+        encoder_outputs=None,
+        **kwargs
+    ):
+        """
+            override the prepare_inputs_for_generation method in BartForConditionalGeneration
+        """
+        # cut decoder_input_ids if past is used
+        if past is not None:
+            decoder_input_ids = decoder_input_ids[:, -1:]
+
+        # expand the encoder attention mask for generation
+        fused_attention_mask = self.get_encoder_attention_masks()
+        expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
+        original_batch_size = fused_attention_mask.size(0)
+        expanded_return_idx = (
+            torch.arange(original_batch_size).view(-1, 1).repeat(1, expand_size).view(-1).to(decoder_input_ids.device)
+        )
+        fused_attention_mask = fused_attention_mask.index_select(0, expanded_return_idx)
+        attention_mask = fused_attention_mask
+
+        return {
+            "input_ids": None,  # encoder_outputs is defined. input_ids not needed
+            "encoder_outputs": encoder_outputs,
+            "past_key_values": past,
+            "decoder_input_ids": decoder_input_ids,
+            "attention_mask": attention_mask,
+            "head_mask": head_mask,
+            "decoder_head_mask": decoder_head_mask,
+            "cross_attn_head_mask": cross_attn_head_mask,
+            "use_cache": use_cache,  # change this to avoid caching (presumably for debugging)
+        }
 
     @property
     def encoder(self):
@@ -119,10 +173,6 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         self.n_tasks = config.n_tasks
         self.wrap_model()
 
-    # We need to resize as B x (N * L) instead of (B * N) x L here
-    # because the T5 forward method uses the input tensors to infer
-    # dimensions used in the decoder.
-    # EncoderWrapper resizes the inputs as (B * N) x L.
     def forward(self, input_ids=None, attention_mask=None, **kwargs):
         if input_ids != None:
             # inputs might have already be resized in the generate method
@@ -146,15 +196,18 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             **kwargs
         )
 
+    def get_encoder_attention_masks(self):
+        return self.encoder.get_attention_mask_for_decoder()
+
     def wrap_model(self):
         """
-        Wrap the model's encoder, decoder with EncoderWrapper, DecoderWrapper.
+        Wrap the model's encoder, decoder with DualFiDEncoderWrapper, DualFIDDecoderWrapper.
         """
         encoder1 = self.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.encoder = DualEncoderWrapper(encoder1, encoder2, self.config.pad_token_id, self.n_tasks, self.config.d_model)
-        self.decoder = DualDecoderWrapper(self.decoder)
+        self.encoder = DualFiDEncoderWrapper(encoder1, encoder2, self.config.pad_token_id, self.n_tasks, self.config.d_model)
+        self.decoder = DualFiDDecoderWrapper(self.decoder, self.get_encoder_attention_masks)
 
     def unwrap_model(self):
         """
@@ -173,9 +226,15 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         """
         Compute the auxiliary loss
         Args:
-            scores: (batch_size, n_candidates, n_tasks)
+            scores: [batch_size, n_candidates, n_tasks]
+        Returns:
+            pred_scores: [batch_size, n_candidates]
+                the aggregated prediction score for direct selction
+            loss: torch.Tensor, float loss
         """
         x, aux_loss = self.encoder.get_multi_task_layer_output()
+        scores = scores.to(x.device)
+        assert x.shape == scores.shape
         # compute contrastive loss
         if aux_loss is not None:
             loss = torch.tensor(aux_loss).to(x.device)
@@ -183,7 +242,45 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             loss = torch.tensor(0.0).to(x.device)
         labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
         loss = F.binary_cross_entropy(x, labels, reduction='mean')
-        return x[:,:,2], loss
+        return torch.sum(x, dim=-1), loss
+
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past=None,
+        attention_mask=None,
+        head_mask=None,
+        decoder_head_mask=None,
+        cross_attn_head_mask=None,
+        use_cache=None,
+        encoder_outputs=None,
+        **kwargs
+    ):
+
+        # cut decoder_input_ids if past is used
+        if past is not None:
+            input_ids = input_ids[:, -1:]
+
+        # expand the encoder attention mask for generation
+        fused_attention_mask = self.get_encoder_attention_masks()
+        expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
+        original_batch_size = fused_attention_mask.size(0)
+        expanded_return_idx = (
+            torch.arange(original_batch_size).view(-1, 1).repeat(1, expand_size).view(-1).to(input_ids.device)
+        )
+        fused_attention_mask = fused_attention_mask.index_select(0, expanded_return_idx)
+        attention_mask = fused_attention_mask
+
+        return {
+            "decoder_input_ids": input_ids,
+            "past_key_values": past,
+            "encoder_outputs": encoder_outputs,
+            "attention_mask": attention_mask,
+            "head_mask": head_mask,
+            "decoder_head_mask": decoder_head_mask,
+            "cross_attn_head_mask": cross_attn_head_mask,
+            "use_cache": use_cache,
+        }
 
 class FiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config, device='cpu'):
@@ -191,10 +288,6 @@ class FiDBART(transformers.BartForConditionalGeneration):
         self.device = device
         self.wrap_encoder()
 
-    # We need to resize as B x (N * L) instead of (B * N) x L here
-    # because the BART forward method uses the input tensors to infer
-    # dimensions used in the decoder.
-    # EncoderWrapper resizes the inputs as (B * N) x L.
     def forward(
         self,
         input_ids=None,
@@ -234,7 +327,7 @@ class FiDBART(transformers.BartForConditionalGeneration):
         """
         Wrap BART encoder to obtain a Fusion-in-Decoder model.
         """
-        self.model.encoder = EncoderWrapper(self.model.encoder)
+        self.model.encoder = FiDEncoderWrapper(self.model.encoder)
 
     def unwrap_encoder(self):
         """
@@ -301,7 +394,7 @@ class FiDT5(transformers.T5ForConditionalGeneration):
         """
         Wrap T5 encoder to obtain a Fusion-in-Decoder model.
         """
-        self.encoder = EncoderWrapper(self.encoder)
+        self.encoder = FiDEncoderWrapper(self.encoder)
 
     def unwrap_encoder(self):
         """

@@ -25,14 +25,12 @@ def main(args):
 
     # model and generation_method of current computed candidates
     types = get_candidate_types(args.dataset, args.set)
-    model_names = set([t[0] for t in types])
-    generation_methods = set([t[1] for t in types])
 
     # add candidates if the curent model and generation_method are not in the dataset
     to_load_types = set(types) - set(ds.candidate_counts.keys())
     for model_name, generation_method in to_load_types:
         print("Loading candidates from -- model:{} \t generation method:{}".format(model_name, generation_method))
-        candidates = load_pkl_candidates(args.dataset, args.set, generation_method, model_name)[:1000] # debug
+        candidates = load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
         ds.add_candidates(model_name, generation_method, candidates)
 
     # prepare metrics
@@ -63,4 +61,5 @@ if __name__ == "__main__":
     parser.add_argument('--eval_bleurt', type = str2bool, default = False)
     parser.add_argument('--eval_bertscore', type = str2bool, default = False)
     args = parser.parse_args()
+    print(args)
     main(args)

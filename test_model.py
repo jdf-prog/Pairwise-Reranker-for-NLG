@@ -3,22 +3,22 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import sys
+import os
 import torch
 import transformers
 import numpy as np
-from pathlib import Path
 import torch.distributed as dist
+import warnings
 from torch.utils.data import DataLoader, SequentialSampler
 from torchmetrics.text.rouge import ROUGEScore
 from tqdm import tqdm
-
-import src.slurm
-import src.util
-from src.options import Options
-import src.data
-import src.model
-import warnings
+from pathlib import Path
+import src.dualfid.slurm
+import src.dualfid.util
+from src.dualfid.options import Options
+import src.dualfid.data
+import src.dualfid.model
 warnings.filterwarnings("ignore")
 
 
@@ -102,8 +102,8 @@ if __name__ == "__main__":
     options = Options()
     options.add_eval_options()
     opt = options.parse()
-    src.slurm.init_distributed_mode(opt)
-    src.slurm.init_signal_handler()
+    src.dualfid.slurm.init_distributed_mode(opt)
+    src.dualfid.slurm.init_signal_handler()
     opt.train_batch_size = opt.per_gpu_batch_size * max(1, opt.world_size)
 
     dir_path = Path(opt.checkpoint_dir)/opt.name
@@ -113,42 +113,42 @@ if __name__ == "__main__":
     dir_path.mkdir(parents=True, exist_ok=True)
     if opt.write_results:
         (dir_path / 'test_results').mkdir(parents=True, exist_ok=True)
-    logger = src.util.init_logger(opt.is_main, opt.is_distributed, Path(opt.checkpoint_dir) / opt.name / 'run.log')
+    logger = src.dualfid.util.init_logger(opt.is_main, opt.is_distributed, Path(opt.checkpoint_dir) / opt.name / 'run.log')
     if not directory_exists and opt.is_main:
         options.print_options(opt)
 
     model_name = opt.model_type + '-' + opt.model_size
     if opt.model_type == 't5':
         model_name = "t5-" + opt.model_size
-        model_class = src.model.FiDT5
+        model_class = src.dualfid.model.FiDT5
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator_function = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'dualt5':
         model_name = "t5-" + opt.model_size
-        model_class = src.model.DualFiDT5
+        model_class = src.dualfid.model.DualFiDT5
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator_function = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'bart':
         model_name = "facebook/bart-" + opt.model_size
-        model_class = src.model.FiDBART
+        model_class = src.dualfid.model.FiDBART
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator_function = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'dualbart':
         model_name = "facebook/bart-" + opt.model_size
-        model_class = src.model.DualFiDBART
+        model_class = src.dualfid.model.DualFiDBART
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name, return_dict=False)
-        collator_function = src.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        collator_function = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
 
     else:
         raise NotImplementedError
 
-    eval_examples = src.data.load_data(
+    eval_examples = src.dualfid.data.load_data(
         opt.eval_data,
         global_rank=opt.global_rank, #use the global rank and world size attibutes to split the eval set on multiple gpus
         world_size=opt.world_size,
         n_tasks=opt.n_tasks,
     )
-    eval_dataset = src.data.Dataset(
+    eval_dataset = src.dualfid.data.Dataset(
         eval_examples,
         opt.n_candidate,
     )
@@ -173,5 +173,5 @@ if __name__ == "__main__":
     if opt.write_results and opt.is_main:
         glob_path = Path(opt.checkpoint_dir) / opt.name / 'test_results'
         write_path = Path(opt.checkpoint_dir) / opt.name / 'final_output.txt'
-        src.util.write_output(glob_path, write_path)
+        src.dualfid.util.write_output(glob_path, write_path)
 
