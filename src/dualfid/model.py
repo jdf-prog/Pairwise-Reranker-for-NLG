@@ -22,10 +22,13 @@ from dualfid.wrapper import (
     DualFiDEncoderWrapper,
     DualFiDDecoderWrapper,
 )
+from dualfid.model_util import (
+    regression_BCE_loss,
+)
+from transformers.models.bart.modeling_bart import shift_tokens_right
 class DualFiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config):
         super().__init__(config)
-        self.n_tasks = config.n_tasks
         self.wrap_model()
 
     def forward(
@@ -34,11 +37,7 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         attention_mask=None,
         decoder_input_ids=None,
         decoder_attention_mask=None,
-        labels=None,
         **kwargs):
-        for k, v in kwargs.items():
-            if isinstance(v, torch.Tensor):
-                print(k, v.size() if v is not None else None)
         if input_ids != None:
             # inputs might have already be resized in the generate method
             if input_ids.dim() == 3:
@@ -52,7 +51,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             attention_mask=attention_mask,
             decoder_input_ids=decoder_input_ids,
             decoder_attention_mask=decoder_attention_mask,
-            labels=labels,
             **kwargs
         )
 
@@ -75,8 +73,19 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         encoder1 = self.model.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.model.encoder = DualFiDEncoderWrapper(encoder1, encoder2, self.model.shared.padding_idx, self.n_tasks, self.config.d_model)
-        self.model.decoder = DualFiDDecoderWrapper(self.model.decoder, self.get_encoder_attention_masks)
+        self.model.encoder = DualFiDEncoderWrapper(
+            encoder1,
+            encoder2,
+            self.model.shared.padding_idx,
+            self.config.n_tasks,
+            self.config.d_model,
+            self.config.top_k_candidates,
+            self.config.use_aux_loss
+        )
+        self.model.decoder = DualFiDDecoderWrapper(
+            self.model.decoder,
+            self.get_encoder_attention_masks
+        )
 
 
     def unwrap_model(self):
@@ -103,16 +112,8 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             loss: torch.Tensor, float loss
         """
         x, aux_loss = self.encoder.get_multi_task_layer_output()
-        scores = scores.to(x.device)
-        assert x.shape == scores.shape
-        # compute contrastive loss
-        if aux_loss is not None:
-            loss = torch.tensor(aux_loss).to(x.device)
-        else:
-            loss = torch.tensor(0.0).to(x.device)
-        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
-        loss = F.binary_cross_entropy(x, labels, reduction='mean')
-        return torch.sum(x, dim=-1), loss
+        return regression_BCE_loss(x, aux_loss, scores)
+
 
     def prepare_inputs_for_generation(
         self,
@@ -170,7 +171,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
 class DualFiDT5(transformers.T5ForConditionalGeneration):
     def __init__(self, config):
         super().__init__(config)
-        self.n_tasks = config.n_tasks
         self.wrap_model()
 
     def forward(self, input_ids=None, attention_mask=None, **kwargs):
@@ -206,7 +206,15 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         encoder1 = self.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.encoder = DualFiDEncoderWrapper(encoder1, encoder2, self.config.pad_token_id, self.n_tasks, self.config.d_model)
+        self.model.encoder = DualFiDEncoderWrapper(
+            encoder1,
+            encoder2,
+            self.config.pad_token_id,
+            self.config.n_tasks,
+            self.config.d_model,
+            self.config.top_k_candidates,
+            self.config.use_aux_loss
+        )
         self.decoder = DualFiDDecoderWrapper(self.decoder, self.get_encoder_attention_masks)
 
     def unwrap_model(self):
@@ -233,16 +241,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             loss: torch.Tensor, float loss
         """
         x, aux_loss = self.encoder.get_multi_task_layer_output()
-        scores = scores.to(x.device)
-        assert x.shape == scores.shape
-        # compute contrastive loss
-        if aux_loss is not None:
-            loss = torch.tensor(aux_loss).to(x.device)
-        else:
-            loss = torch.tensor(0.0).to(x.device)
-        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
-        loss = F.binary_cross_entropy(x, labels, reduction='mean')
-        return torch.sum(x, dim=-1), loss
+        return regression_BCE_loss(x, aux_loss, scores)
 
     def prepare_inputs_for_generation(
         self,
@@ -283,23 +282,21 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         }
 
 class FiDBART(transformers.BartForConditionalGeneration):
-    def __init__(self, config, device='cpu'):
+    def __init__(self, config):
         super().__init__(config)
-        self.device = device
         self.wrap_encoder()
 
     def forward(
         self,
         input_ids=None,
         attention_mask=None,
-        labels=None,
         decoder_input_ids=None,
         decoder_attention_mask=None,
         **kwargs):
         if input_ids != None:
             # inputs might have already be resized in the generate method
             if input_ids.dim() == 3:
-                self.model.encoder.n_ctx = input_ids.size(1) - 1
+                self.model.encoder.n_ctx = input_ids.size(1)
             input_ids = input_ids.view(input_ids.size(0), -1)
         if attention_mask != None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
@@ -309,7 +306,6 @@ class FiDBART(transformers.BartForConditionalGeneration):
             attention_mask=attention_mask,
             decoder_input_ids=decoder_input_ids,
             decoder_attention_mask=decoder_attention_mask,
-            labels=labels,
             **kwargs
         )
 
@@ -327,7 +323,13 @@ class FiDBART(transformers.BartForConditionalGeneration):
         """
         Wrap BART encoder to obtain a Fusion-in-Decoder model.
         """
-        self.model.encoder = FiDEncoderWrapper(self.model.encoder)
+        self.model.encoder = FiDEncoderWrapper(
+            self.model.encoder,
+            self.config.n_tasks,
+            self.config.d_model,
+            self.config.top_k_candidates,
+            self.config.use_aux_loss
+        )
 
     def unwrap_encoder(self):
         """
@@ -351,9 +353,8 @@ class FiDBART(transformers.BartForConditionalGeneration):
 
 
 class FiDT5(transformers.T5ForConditionalGeneration):
-    def __init__(self, config, device='cpu'):
+    def __init__(self, config):
         super().__init__(config)
-        self.device = device
         self.wrap_encoder()
 
     def forward_(self, **kwargs):
@@ -394,7 +395,13 @@ class FiDT5(transformers.T5ForConditionalGeneration):
         """
         Wrap T5 encoder to obtain a Fusion-in-Decoder model.
         """
-        self.encoder = FiDEncoderWrapper(self.encoder)
+        self.encoder = FiDEncoderWrapper(
+            self.encoder,
+            self.config.n_tasks,
+            self.config.d_model,
+            self.config.top_k_candidates,
+            self.config.use_aux_loss
+        )
 
     def unwrap_encoder(self):
         """
@@ -412,12 +419,5 @@ class FiDT5(transformers.T5ForConditionalGeneration):
         self.unwrap_encoder()
         self.load_state_dict(state_dict)
         self.wrap_encoder()
-
-
-
-
-
-
-
 
 

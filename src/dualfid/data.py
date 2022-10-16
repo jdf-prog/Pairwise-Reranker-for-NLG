@@ -13,13 +13,13 @@ class Dataset(torch.utils.data.Dataset):
     def __init__(self,
                  data,
                  n_candidate=None,
-                 source_prefix='document: ',
-                 candidate_prefix='summary: '):
+                 source_prefix='source text: ',
+                 candidate_prefix='candidate text: '):
         self.data = data
         self.n_candidate = n_candidate
         self.source_prefix = source_prefix
         self.candidate_prefix = candidate_prefix
-        self.n_tasks = len(self.data[0]['candidates'][0]['score']) if 'candidates' in self.data[0] else -1
+        self.n_tasks = len(self.data[0]['candidates'][0]['scores']) if 'candidates' in self.data[0] else -1
 
     def __len__(self):
         return len(self.data)
@@ -39,7 +39,7 @@ class Dataset(torch.utils.data.Dataset):
             'source' : self.source_prefix + self.data[index]['source'],
             'target' : self.get_target(self.data[index]),
             'candidates' : [(self.candidate_prefix + "{}").format(c['text']) for c in self.data[index]['candidates'][:self.n_candidate]]  if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
-            'scores' : torch.tensor([[float(score) for score in c['score'].values()] for c in self.data[index]['candidates'][:self.n_candidate]]) if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
+            'scores' : torch.tensor([[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidate]]) if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
         }
 
     def get_example(self, index):
@@ -127,7 +127,7 @@ class FiDCollator(object):
         target_ids = target_ids.masked_fill(~target_mask, -100)
         # encode FiD texts
         def append_candidates(example):
-            return [t + " " + example['source'] for t in example['candidates']]
+            return [candidate + " " + example['source'] for candidate in example['candidates']]
         texts = [append_candidates(example) for example in batch]
         context_ids, context_masks = encode_batch_text(texts,
             self.tokenizer,
@@ -148,7 +148,7 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
             data = json.load(fin)
     examples = []
     if n_tasks < 0:
-        n_tasks = len(data[0]['candidates'][0]['score'])
+        n_tasks = len(data[0]['candidates'][0]['scores'])
     for k, example in enumerate(data):
         if global_rank > -1 and not k%world_size==global_rank:
             continue
@@ -156,8 +156,8 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
             example['id'] = k
         examples.append(example)
         for candidate in example['candidates']:
-            candidate['score'] = {k:float(v) for k,v in list(candidate['score'].items())[:n_tasks]}
-            assert len(candidate['score']) == n_tasks, f"{len(candidate['score'])} != {n_tasks}"
+            candidate['scores'] = {k:float(v) for k,v in list(candidate['scores'].items())[:n_tasks]}
+            assert len(candidate['scores']) == n_tasks, f"{len(candidate['scores'])} != {n_tasks}"
     check_scores(examples)
     return examples
 
@@ -166,12 +166,12 @@ def check_scores(examples):
         Check the upper bound of the scores and print it
     """
     n_candidate = len(examples[0]['candidates'])
-    task_names = list(examples[0]['candidates'][0]['score'].keys())
+    task_names = list(examples[0]['candidates'][0]['scores'].keys())
     max_scores = {task:[] for task in task_names}
     for example in examples:
         for task in task_names:
-            max_scores[task].append(max([c['score'][task] for c in example['candidates']]))
-    candidate_scores = {task:[np.mean([ex['candidates'][i]['score'][task] for ex in examples]) for i in range(n_candidate)] for task in task_names}
+            max_scores[task].append(max([c['scores'][task] for c in example['candidates']]))
+    candidate_scores = {task:[np.mean([ex['candidates'][i]['scores'][task] for ex in examples]) for i in range(n_candidate)] for task in task_names}
     for task in task_names:
         print(f"Selection Upper bound for task '{task}' is {np.mean(max_scores[task])}")
     for task in task_names:

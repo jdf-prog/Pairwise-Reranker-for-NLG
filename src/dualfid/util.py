@@ -145,7 +145,9 @@ def set_optim(opt, model):
             {"params": decoder_param, "lr": opt.decoder_lr},
         ]
     else:
-        optim_params = model.parameters()
+        optim_params =[
+            {"params": model.parameters(), "lr": opt.lr},
+        ]
 
     if opt.optim == 'adam':
         optimizer = torch.optim.Adam(optim_params)

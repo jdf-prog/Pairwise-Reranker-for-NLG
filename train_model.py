@@ -20,8 +20,8 @@ import src.dualfid.slurm
 import src.dualfid.util
 import src.dualfid.data
 import src.dualfid.model
-from src.dualfid.options import Options
 import warnings
+from src.dualfid.options import Options
 warnings.filterwarnings("ignore")
 
 def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, collator, best_dev_score, checkpoint_path):
@@ -77,7 +77,6 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
             else:
                 aux_loss = 0
                 train_loss = generation_loss
-            train_loss /= opt.accumulation_steps
 
             train_loss.backward()
 
@@ -165,8 +164,8 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                     preds, aux_loss = model.module.compute_auxiliary_loss(scores)
                 else:
                     preds, aux_loss = model.compute_auxiliary_loss(scores)
+                assert preds.shape[1] == context_ids.shape[1] - 1, f"{preds.shape[1]} != {context_ids.shape[1] - 1}"
                 for k, pred in enumerate(preds):
-                    assert pred.dim() == 1
                     select_idx = torch.argmax(pred)
                     ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
                     gold = dataset.get_example(idx[k])['target']
@@ -249,6 +248,7 @@ if __name__ == "__main__":
         hf_model_class = transformers.T5ForConditionalGeneration
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        opt.use_aux_loss = False # debug
     elif opt.model_type == "dualt5":
         model_name = "t5-" + opt.model_size
         model_class = src.dualfid.model.DualFiDT5
@@ -256,13 +256,14 @@ if __name__ == "__main__":
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'bart':
-        model_name = "facebook/bart-" + opt.model_size
+        model_name = "facebook/bart-large-cnn"
         model_class = src.dualfid.model.FiDBART
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
+        opt.use_aux_loss = False # debug
     elif opt.model_type == "dualbart":
-        model_name = "facebook/bart-" + opt.model_size
+        model_name = "facebook/bart-large-cnn"
         model_class = src.dualfid.model.DualFiDBART
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
@@ -276,6 +277,7 @@ if __name__ == "__main__":
         hf_model = hf_model_class.from_pretrained(model_name)
         hf_model.config.n_tasks = opt.n_tasks
         hf_model.config.use_aux_loss = opt.use_aux_loss
+        hf_model.config.top_k_candidates = opt.top_k_candidates
         model = model_class(hf_model.config)
         model.load_hfm(hf_model.state_dict())
         model = model.to(opt.local_rank)

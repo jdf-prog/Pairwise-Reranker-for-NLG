@@ -31,7 +31,7 @@ class CustomDataset:
         self._set_logger()
         self.self_check()
 
-    def _prepare_metrics(self, items:List[Dict], metrics:List[str]=None):
+    def _prepare_metrics(self, metrics:List[str]=None):
         """
         prepare the dataset for reranking.
         This function computes all the metrics value of each candidate for each source.
@@ -40,17 +40,14 @@ class CustomDataset:
             metrics: the metrics to be used.
         """
         evaluator = Support()
-        s = psutil.Process(os.getpid())
-        current_cpu_number = s.cpu_num()
-        for item in tqdm(items, desc="Computing metrics on CPU {}".format(current_cpu_number)):
+        for item in tqdm(self.items, desc="Preparing metrics"):
             for cand in item['candidates']:
                 for metric in metrics:
                     # only compute the metric if it is not computed yet
                     if metric not in cand['scores']:
                         cand['scores'][metric] = evaluator.evaluate(hypothesis=cand['text'], reference=item['target'], metric=metric)
-        return items
 
-    def prepare_metrics(self, metrics:List[str]=None, num_workers=1):
+    def prepare_metrics(self, metrics:List[str]=None):
         """
         prepare the dataset for reranking.
         This function computes all the metrics value of each candidate for each source.
@@ -75,17 +72,7 @@ class CustomDataset:
         self.logger.info("Metrics {} already prepared.".format(prepared_metrics))
         self.logger.info("Metrics {} will be prepared.".format(metrics_to_prepare))
         # evaluate and record the metric values
-        chunks = np.array_split(self.items, num_workers)
-        current_cpu_cores = mp.cpu_count()
-        self.logger.info(f"Current CPU cores: {current_cpu_cores}")
-        if num_workers > current_cpu_cores:
-            self.logger.warning(f"Number of workers ({num_workers}) is larger than number of cpu cores ({current_cpu_cores}).")
-        self.logger.info(f"Using {min(num_workers, current_cpu_cores)} workers to compute metrics...")
-        num_workers = min(num_workers, current_cpu_cores)
-        with mp.Pool(num_workers) as pool:
-            results = [pool.apply_async(self._prepare_metrics, args=(chunk, metrics_to_prepare)) for chunk in chunks]
-            results = [p.get() for p in results]
-            self.items = [item for sublist in results for item in sublist]
+        self._prepare_metrics(metrics=metrics_to_prepare)
 
         self.logger.info('Finish preparing metrics {}.'.format(metrics_to_prepare))
         self.logger.info('The current available metrics are {}'.format(self.prepared_metrics))

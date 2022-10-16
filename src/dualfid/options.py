@@ -24,7 +24,8 @@ class Options():
         self.parser.add_argument('--model_size', type=str, default='base')
         self.parser.add_argument('--model_type', type=str, choices=['t5', 'bart', 'dualbart', 'dualt5'], default='t5')
         self.parser.add_argument('--n_candidate', type=int, default=1)
-        self.parser.add_argument('--n_tasks', type=int, default=-1)
+        self.parser.add_argument('--top_k_candidates', type=int, default=-1,
+                        help='number of candidates to be selected by the auxliary layer, -1 means no selection')
 
     def _add_optim_options(self):
         self.parser.add_argument('--warmup_steps', type=int, default=1000)
@@ -34,9 +35,9 @@ class Options():
         self.parser.add_argument('--accumulation_steps', type=int, default=1)
         self.parser.add_argument('--dropout', type=float, default=0.1, help='dropout rate')
         self.parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
-        self.parser.add_argument('--source_encoder_lr', type=float, default=2.5e-5, help='learning rate')
-        self.parser.add_argument('--candidate_encoder_lr', type=float, default=5e-5, help='learning rate')
-        self.parser.add_argument('--decoder_lr', type=float, default=2.5e-5, help='learning rate')
+        self.parser.add_argument('--source_encoder_lr', type=float, default=3e-5, help='learning rate')
+        self.parser.add_argument('--candidate_encoder_lr', type=float, default=6e-5, help='learning rate')
+        self.parser.add_argument('--decoder_lr', type=float, default=3e-5, help='learning rate')
         self.parser.add_argument('--clip', type=float, default=1., help='gradient clipping')
         self.parser.add_argument('--optim', type=str, default='adam')
         self.parser.add_argument('--scheduler', type=str, default='fixed')
@@ -60,6 +61,7 @@ class Options():
     def add_train_options(self):
         self.parser.add_argument('--train_data', type=str, default='none', help='path of train data')
         self.parser.add_argument('--eval_data', type=str, default='none', help='path of eval data')
+        self.parser.add_argument('--n_tasks', type=int, default=-1)
         self.parser.add_argument('--use_aux_loss', action='store_true')
         self.parser.add_argument('--aux_loss_weight', type=float, default=1.0)
         self._add_generation_options()

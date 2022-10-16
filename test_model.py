@@ -10,15 +10,15 @@ import transformers
 import numpy as np
 import torch.distributed as dist
 import warnings
+import src.dualfid.slurm
+import src.dualfid.util
+import src.dualfid.data
+import src.dualfid.model
 from torch.utils.data import DataLoader, SequentialSampler
 from torchmetrics.text.rouge import ROUGEScore
 from tqdm import tqdm
 from pathlib import Path
-import src.dualfid.slurm
-import src.dualfid.util
 from src.dualfid.options import Options
-import src.dualfid.data
-import src.dualfid.model
 warnings.filterwarnings("ignore")
 
 

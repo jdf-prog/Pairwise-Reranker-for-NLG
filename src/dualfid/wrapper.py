@@ -12,30 +12,118 @@ from dualfid.layers import (
     ModelMultitaskRegression
 )
 import numpy as np
+from pytorch_metric_learning import distances
 
 class FiDEncoderWrapper(torch.nn.Module):
     """
     Encoder Wrapper for Wrapper to obtain a Fusion-in-Decoder model.
     """
-    def __init__(self, encoder):
+    def __init__(
+        self,
+        encoder,
+        n_tasks=-1,
+        d_model=512,
+        top_k_candidates=-1,
+        use_aux_loss=False
+    ):
         super().__init__()
         self.encoder = encoder
+        self.use_aux_loss = use_aux_loss
+        self.n_tasks = n_tasks
+        self.top_k_candidates = top_k_candidates
 
-    def forward(self, input_ids=None, attention_mask=None, **kwargs,):
-        # total_length = n_ctx * passage_length
+        # auxiliary layer
+        if self.use_aux_loss:
+            self.auxiliary_layer = MoERegression(n_tasks, 2 * d_model, d_model)
+
+
+        # # the following are used to save the intermediate results
+        self.n_ctx = None # number of fused pairs of source encoder and candidates
+        self.preds = None
+        self.aux_loss = None
+        self.source_cls_embedding = None
+        self.candidate_cls_embedding = None
+        self.top_k_indices = None
+        self.encoder_attention_masks = None
+        self.encoder_attention_masks_used = True
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        return_dict=None,
+        **kwargs,):
+        # total_length = n_ctx * fuse_length
         bsz, total_length = input_ids.shape
-        passage_length = total_length // self.n_ctx
-        input_ids = input_ids.view(bsz*self.n_ctx, passage_length)
-        attention_mask = attention_mask.view(bsz*self.n_ctx, passage_length)
+        fuse_length = total_length // self.n_ctx
+        input_ids = input_ids.view(bsz*self.n_ctx, fuse_length)
+        attention_mask = attention_mask.view(bsz*self.n_ctx, fuse_length)
         outputs = self.encoder(input_ids, attention_mask, **kwargs)
-        outputs = (outputs[0].reshape(bsz, self.n_ctx*passage_length, -1), ) + outputs[1:]
-        return outputs
+        outputs = (outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1), ) + outputs[1:]
+        # Wrap the outputs in a BaseModelOutput when return_dict is True
+        if return_dict:
+            return BaseModelOutput(
+                last_hidden_state=outputs[0],
+                hidden_states=outputs[1] if len(outputs) > 1 else None,
+                attentions=outputs[2] if len(outputs) > 2 else None,
+            )
+        else:
+            return tuple(v for v in outputs if v is not None)
+
+    def get_cls_embed(self):
+        """
+            Get the cls embedding of both encoder1 and encoder2 from the steps before
+            set to empty once get
+            Returns:
+                source_cls_embedding: [bsz*accum_steps, hidden_size]
+                candidate_cls_embedding: [bsz*accum_steps, n_ctx-1, hidden_size]
+        """
+        if self.source_cls_embedding is None or self.candidate_cls_embedding is None:
+            raise ValueError("source_cls_embedding or candidate_cls_embedding is not set, please run forward first")
+        result = (self.source_cls_embedding, self.candidate_cls_embedding)
+        self.source_cls_embedding = None
+        self.candidate_cls_embedding = None
+        return result
+
+    def get_attention_mask_for_decoder(self):
+        """
+            Get the attention mask for the decoder after
+            fused the hidden states of encoder1 and encoder2
+        """
+        if self.encoder_attention_masks is None:
+            raise ValueError("encoder_attention_mask is not set, please run forward first")
+        self.encoder_attention_masks_used = True
+        return self.encoder_attention_masks
+
+
+    def get_multi_task_layer_output(self):
+        """
+            Get the output of the multi-task layer
+            for computing auxiliary loss
+        Returns:
+            preds: [bsz, n_candidates, n_tasks]
+            aux_loss: torch.tensor, float loss
+        """
+        if self.preds is None:
+            raise ValueError("preds is not set, please run forward first")
+        result = (self.preds, self.aux_loss)
+        self.preds = None
+        self.aux_loss = None
+        return result
 
 class DualFiDEncoderWrapper(torch.nn.Module):
     """
     Encoder Wrapper for Wrapper to obtain a Dual Fusion-in-Decoder model.
     """
-    def __init__(self, encoder1, encoder2, padding_idx=0, n_tasks=-1, d_model=512, top_k=3):
+    def __init__(
+        self,
+        encoder1,
+        encoder2,
+        padding_idx=0,
+        n_tasks=-1,
+        d_model=512,
+        top_k_candidates=-1,
+        use_aux_loss=False):
         """
             The 2 encoder should have the same d_model
         Args:
@@ -44,7 +132,7 @@ class DualFiDEncoderWrapper(torch.nn.Module):
             padding_idx: the padding token id
             n_tasks: the number of tasks
             d_model: the hidden size of the model
-            top_k: the number of candidates to select
+            top_k_candidates: the number of candidates to select
         """
         super().__init__()
         # duplicate encoder, one for the source, one for the candidates
@@ -53,11 +141,15 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         self.padding_idx = padding_idx
         self.n_tasks = n_tasks
         self.d_model = d_model
-        self.top_k = top_k
+        self.top_k = top_k_candidates
+        self.use_aux_loss = use_aux_loss
+
 
         # auxiliary layers
-        self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
-        # self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
+        if self.use_aux_loss:
+            self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
+            # self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
+            # self.dist = distances.CosineSimilarity()
 
         # the following are used to save the intermediate results
         self.preds = None
@@ -80,7 +172,7 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         reduced_length = input_ids.size(1)
         return input_ids, attention_mask, reduced_length
 
-    def update_topk_indices(self, topk=1):
+    def update_topk_indices(self):
         """
         Select the topk candidates from the candidates
         Args:
@@ -88,14 +180,19 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         Returns:
             best_pred_index: [bsz, topk]
         """
+        if not self.use_aux_loss:
+            self.top_k_indices = None
+            return None
         source_cls_embed, candidate_cls_embed = self.get_cls_embed()
         bzs, n_candidates, d_model = candidate_cls_embed.size()
+
+        # multi-task regression
         inputs = torch.cat((
             source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
             candidate_cls_embed
         ), dim=-1)
-        # save the pred scores for loss computation
         preds, aux_loss = self.multi_task_layer(inputs)
+        # save the pred scores for loss computation
         if self.preds is None:
             self.preds = preds
             self.aux_loss = aux_loss
@@ -103,13 +200,16 @@ class DualFiDEncoderWrapper(torch.nn.Module):
             self.preds = torch.cat((self.preds, preds), dim=0)
             self.aux_loss += aux_loss
 
-        # change the scores to rank
+        # # change the scores to rank
         ranks = torch.argsort(preds, dim=1).type(torch.float) # lower score get worse and lower rank
         assert ranks.shape == (bzs, n_candidates, self.n_tasks)
         # select the index of the one with the top khigghest average rank
-        _, indices = torch.topk(torch.mean(ranks, dim=-1), k=topk, dim=-1)
+        top_k = min(self.top_k, self.n_ctx - 1) if self.top_k > 0 else self.n_ctx - 1
+        _, indices = torch.topk(torch.mean(ranks, dim=-1), k=top_k, dim=-1)
+
         self.top_k_indices = indices
-        assert self.top_k_indices.shape == (bzs, topk)
+
+        assert self.top_k_indices.shape == (bzs, top_k)
         return indices
 
     def _concantenate_shape(self, source_encoding, candidate_encoding):
@@ -124,12 +224,14 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         bsz, source_length, hidden_size = source_encoding.size()
         _, candidate_length, hidden_size = candidate_encoding.size()
         indices = self.top_k_indices
-        if indices is None:
-            raise ValueError("top_k_indices is not set!")
         encoded_source = source_encoding.reshape(bsz, source_length, -1)
         encoded_candidates = candidate_encoding.reshape(bsz, (self.n_ctx-1), candidate_length, -1)
         # select the topk candidates
-        topk_encoded_candidates = encoded_candidates[torch.arange(bsz).unsqueeze(1), indices, :, :].reshape(bsz, -1, hidden_size)
+        if indices is not None:
+            topk_encoded_candidates = encoded_candidates[torch.arange(bsz).unsqueeze(1), indices, :, :].reshape(bsz, -1, hidden_size)
+        else:
+            # not select because of no auxliary loss computed
+            topk_encoded_candidates = encoded_candidates.reshape(bsz, -1, hidden_size)
         reuslt = torch.cat([encoded_source, topk_encoded_candidates], dim=1)
         return reuslt
 
@@ -166,8 +268,7 @@ class DualFiDEncoderWrapper(torch.nn.Module):
 
         # concatenate the outputs of the 2 encoders
         outputs = tuple()
-        top_k = min(self.n_ctx-1, self.top_k)
-        self.update_topk_indices(top_k) # select the topk candidates (bsz, topk, 1)
+        self.update_topk_indices() # select the topk candidates (bsz, topk, 1)
 
         # 1. last_hidden_state
         encoder_hidden_states = self._concantenate_shape(
@@ -178,15 +279,12 @@ class DualFiDEncoderWrapper(torch.nn.Module):
             source_attention_mask.reshape(bsz, source_length, 1),
             candidate_attention_mask.reshape(bsz*(self.n_ctx-1), candidate_length, 1)
         ).reshape(bsz, -1)
-        assert encoder_hidden_states.shape == (bsz, source_length + top_k*candidate_length, self.d_model), \
-            f"{encoder_hidden_states.shape} != {(bsz, source_length + top_k*candidate_length, self.d_model)}" # debug
-        assert encoder_attention_masks.shape == (bsz, source_length + top_k*candidate_length), \
-            f"{encoder_attention_masks.shape} != {(bsz, source_length + top_k*candidate_length)}" # debug
         # save for cross attention in the deocder
         if self.encoder_attention_masks_used:
             self.encoder_attention_masks = encoder_attention_masks
         else:
             self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, encoder_attention_masks), dim=0)
+        # encoder_hidden_states = encoder_hidden_states.detach() # NOTE: debug, detach the encoder and decoder
         outputs += (encoder_hidden_states,)
 
         # 2. all hidden states
