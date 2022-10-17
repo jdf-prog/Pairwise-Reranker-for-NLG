@@ -34,16 +34,12 @@ class FiDEncoderWrapper(torch.nn.Module):
 
         # auxiliary layer
         if self.use_aux_loss:
-            self.auxiliary_layer = MoERegression(n_tasks, 2 * d_model, d_model)
-
+            self.auxiliary_layer = MoERegression(n_tasks, d_model, d_model)
 
         # # the following are used to save the intermediate results
         self.n_ctx = None # number of fused pairs of source encoder and candidates
         self.preds = None
         self.aux_loss = None
-        self.source_cls_embedding = None
-        self.candidate_cls_embedding = None
-        self.top_k_indices = None
         self.encoder_attention_masks = None
         self.encoder_attention_masks_used = True
 
@@ -58,8 +54,45 @@ class FiDEncoderWrapper(torch.nn.Module):
         fuse_length = total_length // self.n_ctx
         input_ids = input_ids.view(bsz*self.n_ctx, fuse_length)
         attention_mask = attention_mask.view(bsz*self.n_ctx, fuse_length)
-        outputs = self.encoder(input_ids, attention_mask, **kwargs)
-        outputs = (outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1), ) + outputs[1:]
+        outputs = self.encoder(input_ids, attention_mask, **kwargs) # [bsz*n_ctx, fuse_length, d_model]
+
+        if self.use_aux_loss:
+            fuse_embeddings = outputs[0].reshape(bsz, self.n_ctx, fuse_length, -1)[:,:,0,:].detach() # debug, detach
+            # save the predictions and aux_loss
+            preds, aux_loss = self.auxiliary_layer(fuse_embeddings)
+            if self.preds is None:
+                self.preds = preds
+            else:
+                self.preds = torch.cat((self.preds, preds), dim=1)
+            if self.aux_loss is None:
+                self.aux_loss = aux_loss
+            else:
+                self.aux_loss += aux_loss
+
+            if self.top_k_candidates is not None and self.top_k_candidates > 0:
+                top_k_indices = torch.topk(torch.sum(preds, dim=2), self.top_k_candidates, dim=1)[1] # [bsz, top_k_candidates]
+
+                last_hidden_states = outputs[0].reshape(bsz, self.n_ctx, fuse_length, -1)
+                last_hidden_states = last_hidden_states[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length, d_model]
+                last_hidden_states = last_hidden_states.reshape(bsz, self.top_k_candidates*fuse_length, -1)
+                attention_mask = attention_mask.reshape(bsz, self.n_ctx, fuse_length)
+                attention_mask = attention_mask[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length]
+                attention_mask = attention_mask.reshape(bsz, self.top_k_candidates*fuse_length)
+                if self.encoder_attention_masks_used:
+                    self.encoder_attention_masks = attention_mask
+                    self.encoder_attention_masks_used = False
+                else:
+                    self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, attention_mask), dim=0)
+            else:
+                last_hidden_states = outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1)
+                if self.encoder_attention_masks_used:
+                    self.encoder_attention_masks = attention_mask
+                    self.encoder_attention_masks_used = False
+                else:
+                    self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, attention_mask), dim=0)
+
+
+        outputs = (last_hidden_states, ) + outputs[1:]
         # Wrap the outputs in a BaseModelOutput when return_dict is True
         if return_dict:
             return BaseModelOutput(
@@ -69,32 +102,6 @@ class FiDEncoderWrapper(torch.nn.Module):
             )
         else:
             return tuple(v for v in outputs if v is not None)
-
-    def get_cls_embed(self):
-        """
-            Get the cls embedding of both encoder1 and encoder2 from the steps before
-            set to empty once get
-            Returns:
-                source_cls_embedding: [bsz*accum_steps, hidden_size]
-                candidate_cls_embedding: [bsz*accum_steps, n_ctx-1, hidden_size]
-        """
-        if self.source_cls_embedding is None or self.candidate_cls_embedding is None:
-            raise ValueError("source_cls_embedding or candidate_cls_embedding is not set, please run forward first")
-        result = (self.source_cls_embedding, self.candidate_cls_embedding)
-        self.source_cls_embedding = None
-        self.candidate_cls_embedding = None
-        return result
-
-    def get_attention_mask_for_decoder(self):
-        """
-            Get the attention mask for the decoder after
-            fused the hidden states of encoder1 and encoder2
-        """
-        if self.encoder_attention_masks is None:
-            raise ValueError("encoder_attention_mask is not set, please run forward first")
-        self.encoder_attention_masks_used = True
-        return self.encoder_attention_masks
-
 
     def get_multi_task_layer_output(self):
         """
@@ -110,6 +117,16 @@ class FiDEncoderWrapper(torch.nn.Module):
         self.preds = None
         self.aux_loss = None
         return result
+
+    def get_attention_mask_for_decoder(self):
+        """
+            Get the attention mask for the decoder after
+            fused the hidden states of encoder1 and encoder2
+        """
+        if self.encoder_attention_masks is None:
+            raise ValueError("encoder_attention_mask is not set, please run forward first")
+        self.encoder_attention_masks_used = True
+        return self.encoder_attention_masks
 
 class DualFiDEncoderWrapper(torch.nn.Module):
     """
@@ -366,7 +383,7 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         self.aux_loss = None
         return result
 
-class DualFiDDecoderWrapper(torch.nn.Module):
+class DecoderWrapper(torch.nn.Module):
     """
     Decoder Wrapper to assist the DualEncoderWrapper
     """
@@ -385,9 +402,6 @@ class DualFiDDecoderWrapper(torch.nn.Module):
         """
             adjust the encoder padding mask to fit the padding reduce during the encoding
         """
-        # After the reduce, no padding existing in the encoder_hidden_states
-        # So the encoder padding mask is all True, i.e. all attending
-        # TODO: problems exist here about the padding mask
         fused_encoder_attention_mask = self.get_attention_mask()
         # if training, then use fused mask
         # else if generation, then the original attention mask, processed in function

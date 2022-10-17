@@ -43,20 +43,16 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
                 num_beams=opt.num_beams,
                 min_length=opt.min_length,
             )
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                preds, aux_loss = model.module.compute_auxiliary_loss(scores)
-            else:
-                preds, aux_loss = model.compute_auxiliary_loss(scores)
+            if opt.use_aux_loss:
+                if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                    preds, aux_loss = model.module.compute_auxiliary_loss(scores)
+                else:
+                    preds, aux_loss = model.compute_auxiliary_loss(scores)
 
-            for k, pred in enumerate(preds):
-                select_idx = torch.argmax(pred)
-                ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
-                example = dataset.get_example(idx[k])
-                gold = example['target']
-                score = rouge_score(ans, gold)
-                rouge_scores_sel.append(score)
-                if opt.write_results:
-                    fw.write(str(example['id']) + "\t" + ans + '\n')
+                for k, pred in enumerate(preds):
+                    select_idx = torch.argmax(pred)
+                    score = scores[k][select_idx]
+                    rouge_scores_sel.append(score)
 
             for k, o in enumerate(outputs):
                 ans = tokenizer.decode(o, skip_special_tokens=True)
@@ -70,25 +66,31 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
             if (i + 1) % opt.eval_print_freq == 0:
                 log = f'Process rank:{opt.global_rank}, {i+1} / {len(dataloader)}'
                 result = {
-                    'rouge1_sel': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
-                    'rouge2_sel': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
-                    'rougeL_sel': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
                     'rouge1_gen': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_gen]),
                     'rouge2_gen': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_gen]),
                     'rougeL_gen': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_gen]),
                 }
+                if opt.use_aux_loss:
+                    result.update({
+                        'rouge1_sel': np.mean([r['rouge1'] for r in rouge_scores_sel]),
+                        'rouge2_sel': np.mean([r['rouge2'] for r in rouge_scores_sel]),
+                        'rougeL_sel': np.mean([r['rougeL'] for r in rouge_scores_sel]),
+                    })
                 for k, v in result.items():
                     log += f' |\n {k} = {v:.3f}'
                 logger.warning(log)
     log = f'Process rank:{opt.global_rank}, final result'
     result = {
-        'rouge1_sel': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
-        'rouge2_sel': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
-        'rougeL_sel': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
         'rouge1_gen': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_gen]),
         'rouge2_gen': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_gen]),
         'rougeL_gen': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_gen]),
     }
+    if opt.use_aux_loss:
+        result.update({
+            'rouge1_sel': np.mean([r['rouge1'] for r in rouge_scores_sel]),
+            'rouge2_sel': np.mean([r['rouge2'] for r in rouge_scores_sel]),
+            'rougeL_sel': np.mean([r['rougeL'] for r in rouge_scores_sel]),
+        })
     for k, v in result.items():
         log += f' |\n {k} = {v:.3f}'
     logger.warning(log)
@@ -146,7 +148,6 @@ if __name__ == "__main__":
         opt.eval_data,
         global_rank=opt.global_rank, #use the global rank and world size attibutes to split the eval set on multiple gpus
         world_size=opt.world_size,
-        n_tasks=opt.n_tasks,
     )
     eval_dataset = src.dualfid.data.Dataset(
         eval_examples,
@@ -161,11 +162,13 @@ if __name__ == "__main__":
         num_workers=20,
         collate_fn=collator_function
     )
-    opt.n_tasks = eval_dataset.n_tasks
 
     # load the model from the checkpoint
     model = model_class.from_pretrained(opt.model_path)
     model = model.to(opt.device)
+    opt.use_aux_loss = model.config.use_aux_loss
+    opt.n_tasks = model.config.n_tasks
+
 
     logger.info("Start eval")
     evaluate(model, eval_dataset, eval_dataloader, tokenizer, opt)

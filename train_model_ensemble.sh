@@ -17,7 +17,7 @@ model_size="large"
 name="diverse_beam_search"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 source_maxlength=512
-candidate_maxlength=128s
+candidate_maxlength=200
 
 echo "model type: ${model_type}"
 echo "model size: ${model_size}"

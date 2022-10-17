@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dualfid.wrapper import (
     FiDEncoderWrapper,
     DualFiDEncoderWrapper,
-    DualFiDDecoderWrapper,
+    DecoderWrapper,
 )
 from dualfid.model_util import (
     regression_BCE_loss,
@@ -63,9 +63,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             **kwargs
         )
 
-    def get_encoder_attention_masks(self):
-        return self.encoder.get_attention_mask_for_decoder()
-
     def wrap_model(self):
         """
         Wrap the model's encoder, decoder with DualFIDEncoderWrapper, FualFIDDecoderWrapper.
@@ -82,9 +79,9 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             self.config.top_k_candidates,
             self.config.use_aux_loss
         )
-        self.model.decoder = DualFiDDecoderWrapper(
+        self.model.decoder = DecoderWrapper(
             self.model.decoder,
-            self.get_encoder_attention_masks
+            self.encoder.get_attention_mask_for_decoder
         )
 
 
@@ -135,7 +132,7 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             decoder_input_ids = decoder_input_ids[:, -1:]
 
         # expand the encoder attention mask for generation
-        fused_attention_mask = self.get_encoder_attention_masks()
+        fused_attention_mask = self.encoder.get_attention_mask_for_decoder()
         expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
         original_batch_size = fused_attention_mask.size(0)
         expanded_return_idx = (
@@ -196,9 +193,6 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             **kwargs
         )
 
-    def get_encoder_attention_masks(self):
-        return self.encoder.get_attention_mask_for_decoder()
-
     def wrap_model(self):
         """
         Wrap the model's encoder, decoder with DualFiDEncoderWrapper, DualFIDDecoderWrapper.
@@ -206,7 +200,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
         encoder1 = self.encoder
         encoder2 = copy.deepcopy(encoder1)
         encoder2.embed_tokens = encoder1.embed_tokens # share the embedding
-        self.model.encoder = DualFiDEncoderWrapper(
+        self.encoder = DualFiDEncoderWrapper(
             encoder1,
             encoder2,
             self.config.pad_token_id,
@@ -215,7 +209,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             self.config.top_k_candidates,
             self.config.use_aux_loss
         )
-        self.decoder = DualFiDDecoderWrapper(self.decoder, self.get_encoder_attention_masks)
+        self.decoder = DecoderWrapper(self.decoder, self.encoder.get_attention_mask_for_decoder)
 
     def unwrap_model(self):
         """
@@ -261,7 +255,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
             input_ids = input_ids[:, -1:]
 
         # expand the encoder attention mask for generation
-        fused_attention_mask = self.get_encoder_attention_masks()
+        fused_attention_mask = self.encoder.get_attention_mask_for_decoder()
         expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
         original_batch_size = fused_attention_mask.size(0)
         expanded_return_idx = (
@@ -284,7 +278,7 @@ class DualFiDT5(transformers.T5ForConditionalGeneration):
 class FiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config):
         super().__init__(config)
-        self.wrap_encoder()
+        self.wrap_model()
 
     def forward(
         self,
@@ -319,7 +313,7 @@ class FiDBART(transformers.BartForConditionalGeneration):
             **kwargs
         )
 
-    def wrap_encoder(self):
+    def wrap_model(self):
         """
         Wrap BART encoder to obtain a Fusion-in-Decoder model.
         """
@@ -330,18 +324,76 @@ class FiDBART(transformers.BartForConditionalGeneration):
             self.config.top_k_candidates,
             self.config.use_aux_loss
         )
+        self.model.decoder = DecoderWrapper(
+            self.model.decoder,
+            self.model.encoder.get_attention_mask_for_decoder)
 
-    def unwrap_encoder(self):
+    def unwrap_model(self):
         """
         Unwrap Fusion-in-Decoder encoder, useful to load BART weights.
         """
         self.model.encoder = self.model.encoder.encoder
+        self.model.decoder = self.model.decoder.decoder
 
     def load_hfm(self, state_dict):
         """ load huggingface model """
-        self.unwrap_encoder()
+        self.unwrap_model()
         self.load_state_dict(state_dict)
-        self.wrap_encoder()
+        self.wrap_model()
+
+    def compute_auxiliary_loss(self, scores):
+        """
+        Compute the auxiliary loss
+        Args:
+            scores: [batch_size, n_candidates, n_tasks]
+        Returns:
+            pred_scores: [batch_size, n_candidates]
+                the aggregated prediction score for direct selction
+            loss: torch.Tensor, float loss
+        """
+        x, aux_loss = self.model.encoder.get_multi_task_layer_output()
+        return regression_BCE_loss(x, aux_loss, scores)
+
+    def prepare_inputs_for_generation(
+        self,
+        decoder_input_ids,
+        past=None,
+        attention_mask=None,
+        head_mask=None,
+        decoder_head_mask=None,
+        cross_attn_head_mask=None,
+        use_cache=None,
+        encoder_outputs=None,
+        **kwargs
+    ):
+        """
+            override the prepare_inputs_for_generation method in BartForConditionalGeneration
+        """
+        # cut decoder_input_ids if past is used
+        if past is not None:
+            decoder_input_ids = decoder_input_ids[:, -1:]
+
+        # expand the encoder attention mask for generation
+        fused_attention_mask = self.encoder.get_attention_mask_for_decoder()
+        expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
+        original_batch_size = fused_attention_mask.size(0)
+        expanded_return_idx = (
+            torch.arange(original_batch_size).view(-1, 1).repeat(1, expand_size).view(-1).to(decoder_input_ids.device)
+        )
+        fused_attention_mask = fused_attention_mask.index_select(0, expanded_return_idx)
+        attention_mask = fused_attention_mask
+
+        return {
+            "input_ids": None,  # encoder_outputs is defined. input_ids not needed
+            "encoder_outputs": encoder_outputs,
+            "past_key_values": past,
+            "decoder_input_ids": decoder_input_ids,
+            "attention_mask": attention_mask,
+            "head_mask": head_mask,
+            "decoder_head_mask": decoder_head_mask,
+            "cross_attn_head_mask": cross_attn_head_mask,
+            "use_cache": use_cache,  # change this to avoid caching (presumably for debugging)
+        }
 
     @property
     def encoder(self):
@@ -402,6 +454,9 @@ class FiDT5(transformers.T5ForConditionalGeneration):
             self.config.top_k_candidates,
             self.config.use_aux_loss
         )
+        self.decoder = DecoderWrapper(
+            self.decoder,
+            self.encoder.get_attention_mask_for_decoder)
 
     def unwrap_encoder(self):
         """
@@ -419,5 +474,43 @@ class FiDT5(transformers.T5ForConditionalGeneration):
         self.unwrap_encoder()
         self.load_state_dict(state_dict)
         self.wrap_encoder()
+
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past=None,
+        attention_mask=None,
+        head_mask=None,
+        decoder_head_mask=None,
+        cross_attn_head_mask=None,
+        use_cache=None,
+        encoder_outputs=None,
+        **kwargs
+    ):
+
+        # cut decoder_input_ids if past is used
+        if past is not None:
+            input_ids = input_ids[:, -1:]
+
+        # expand the encoder attention mask for generation
+        fused_attention_mask = self.encoder.get_attention_mask_for_decoder()
+        expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
+        original_batch_size = fused_attention_mask.size(0)
+        expanded_return_idx = (
+            torch.arange(original_batch_size).view(-1, 1).repeat(1, expand_size).view(-1).to(input_ids.device)
+        )
+        fused_attention_mask = fused_attention_mask.index_select(0, expanded_return_idx)
+        attention_mask = fused_attention_mask
+
+        return {
+            "decoder_input_ids": input_ids,
+            "past_key_values": past,
+            "encoder_outputs": encoder_outputs,
+            "attention_mask": attention_mask,
+            "head_mask": head_mask,
+            "decoder_head_mask": decoder_head_mask,
+            "cross_attn_head_mask": cross_attn_head_mask,
+            "use_cache": use_cache,
+        }
 
 

@@ -78,6 +78,7 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                 aux_loss = 0
                 train_loss = generation_loss
 
+            train_loss /= opt.accumulation_steps
             train_loss.backward()
 
             if step % opt.accumulation_steps == 0:
@@ -164,12 +165,9 @@ def evaluate(model, dataset, tokenizer, collator, opt):
                     preds, aux_loss = model.module.compute_auxiliary_loss(scores)
                 else:
                     preds, aux_loss = model.compute_auxiliary_loss(scores)
-                assert preds.shape[1] == context_ids.shape[1] - 1, f"{preds.shape[1]} != {context_ids.shape[1] - 1}"
                 for k, pred in enumerate(preds):
                     select_idx = torch.argmax(pred)
-                    ans = tokenizer.decode(context_ids[k][select_idx+1], skip_special_tokens=True)
-                    gold = dataset.get_example(idx[k])['target']
-                    score = rouge_score(ans, gold)
+                    score = scores[k][select_idx]
                     rouge_scores_sel.append(score)
             for k, o in enumerate(outputs):
                 ans = tokenizer.decode(o, skip_special_tokens=True)
@@ -187,9 +185,9 @@ def evaluate(model, dataset, tokenizer, collator, opt):
     if opt.use_aux_loss:
         result.update({
             "sel":{
-                'rouge1': np.mean([r['rouge1_fmeasure'] for r in rouge_scores_sel]),
-                'rouge2': np.mean([r['rouge2_fmeasure'] for r in rouge_scores_sel]),
-                'rougeL': np.mean([r['rougeL_fmeasure'] for r in rouge_scores_sel]),
+                'rouge1': np.mean([r['rouge1'] for r in rouge_scores_sel]),
+                'rouge2': np.mean([r['rouge2'] for r in rouge_scores_sel]),
+                'rougeL': np.mean([r['rougeL'] for r in rouge_scores_sel]),
             }})
 
     return result
@@ -248,7 +246,6 @@ if __name__ == "__main__":
         hf_model_class = transformers.T5ForConditionalGeneration
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
-        opt.use_aux_loss = False # debug
     elif opt.model_type == "dualt5":
         model_name = "t5-" + opt.model_size
         model_class = src.dualfid.model.DualFiDT5
@@ -261,7 +258,6 @@ if __name__ == "__main__":
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
-        opt.use_aux_loss = False # debug
     elif opt.model_type == "dualbart":
         model_name = "facebook/bart-large-cnn"
         model_class = src.dualfid.model.DualFiDBART

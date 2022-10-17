@@ -15,7 +15,7 @@ test_data_path="./data/prepared/cnndm/test/dataset.jsonl"
 
 model_type='bart'
 model_size="large"
-name="diverse_beam_search_no_aux"
+name="DBM_sel_gen_10to5"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 source_maxlength=512
 candidate_maxlength=200
@@ -42,9 +42,11 @@ python \
         --scheduler linear \
         --weight_decay 0.001 \
         --per_gpu_batch_size 1 \
-        --n_candidate 15 \
+        --n_candidate 10 \
         --total_step 25000 \
         --warmup_step 3000 \
         --main_port 19000 \
         --accumulation_steps 2 \
+        --top_k_candidates 5 \
+        --use_aux_loss
 
