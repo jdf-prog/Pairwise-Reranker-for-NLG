@@ -48,5 +48,5 @@ python \
         --main_port 19000 \
         --accumulation_steps 2 \
         --top_k_candidates 5 \
-        --use_aux_loss
+        --use_aux_loss \
 

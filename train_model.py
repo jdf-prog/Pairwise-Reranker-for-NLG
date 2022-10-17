@@ -185,9 +185,9 @@ def evaluate(model, dataset, tokenizer, collator, opt):
     if opt.use_aux_loss:
         result.update({
             "sel":{
-                'rouge1': np.mean([r['rouge1'] for r in rouge_scores_sel]),
-                'rouge2': np.mean([r['rouge2'] for r in rouge_scores_sel]),
-                'rougeL': np.mean([r['rougeL'] for r in rouge_scores_sel]),
+                'rouge1': np.mean([r[0] for r in rouge_scores_sel]),
+                'rouge2': np.mean([r[1] for r in rouge_scores_sel]),
+                'rougeL': np.mean([r[2] for r in rouge_scores_sel]),
             }})
 
     return result

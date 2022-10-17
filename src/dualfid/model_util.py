@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from dualfid.data import Dataset
 def regression_BCE_loss(x, aux_loss, scores):
 
     scores = scores.to(x.device)

@@ -72,9 +72,9 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
                 }
                 if opt.use_aux_loss:
                     result.update({
-                        'rouge1_sel': np.mean([r['rouge1'] for r in rouge_scores_sel]),
-                        'rouge2_sel': np.mean([r['rouge2'] for r in rouge_scores_sel]),
-                        'rougeL_sel': np.mean([r['rougeL'] for r in rouge_scores_sel]),
+                        'rouge1_sel': np.mean([r[0] for r in rouge_scores_sel]),
+                        'rouge2_sel': np.mean([r[1] for r in rouge_scores_sel]),
+                        'rougeL_sel': np.mean([r[2] for r in rouge_scores_sel]),
                     })
                 for k, v in result.items():
                     log += f' |\n {k} = {v:.3f}'
@@ -87,9 +87,9 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
     }
     if opt.use_aux_loss:
         result.update({
-            'rouge1_sel': np.mean([r['rouge1'] for r in rouge_scores_sel]),
-            'rouge2_sel': np.mean([r['rouge2'] for r in rouge_scores_sel]),
-            'rougeL_sel': np.mean([r['rougeL'] for r in rouge_scores_sel]),
+            'rouge1_sel': np.mean([r[0] for r in rouge_scores_sel]),
+            'rouge2_sel': np.mean([r[1] for r in rouge_scores_sel]),
+            'rougeL_sel': np.mean([r[2] for r in rouge_scores_sel]),
         })
     for k, v in result.items():
         log += f' |\n {k} = {v:.3f}'
