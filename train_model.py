@@ -22,6 +22,7 @@ import src.dualfid.data
 import src.dualfid.model
 import warnings
 from src.dualfid.options import Options
+from src.dualfid.model_util import augment_training_data
 warnings.filterwarnings("ignore")
 
 def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, collator, best_dev_score, checkpoint_path):
@@ -227,6 +228,7 @@ if __name__ == "__main__":
         n_tasks=opt.n_tasks,
     )
     train_dataset = src.dualfid.data.Dataset(train_examples, opt.n_candidate)
+    augment_training_data(train_dataset)
     # use golbal rank and world size to split the eval set on multiple gpus
     eval_examples = src.dualfid.data.load_data(
         opt.eval_data,

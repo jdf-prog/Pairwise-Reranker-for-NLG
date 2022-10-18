@@ -31,22 +31,6 @@ class CustomDataset:
         self._set_logger()
         self.self_check()
 
-    def _prepare_metrics(self, metrics:List[str]=None):
-        """
-        prepare the dataset for reranking.
-        This function computes all the metrics value of each candidate for each source.
-
-        Args:
-            metrics: the metrics to be used.
-        """
-        evaluator = Support()
-        for item in tqdm(self.items, desc="Preparing metrics"):
-            for cand in item['candidates']:
-                for metric in metrics:
-                    # only compute the metric if it is not computed yet
-                    if metric not in cand['scores']:
-                        cand['scores'][metric] = evaluator.evaluate(hypothesis=cand['text'], reference=item['target'], metric=metric)
-
     def prepare_metrics(self, metrics:List[str]=None):
         """
         prepare the dataset for reranking.
@@ -54,7 +38,6 @@ class CustomDataset:
 
         Args:
             metrics: the metrics to be used.
-            num_workers: the number of workers to be used for computing the metrics.
         """
         self.logger.info('Preparing metrics...')
         # if metrics is not specified, use 'bleu' by default
@@ -68,12 +51,15 @@ class CustomDataset:
         prepared_metrics = self.prepared_metrics
         metrics_to_prepare = set(metrics) - set(prepared_metrics)
 
-
         self.logger.info("Metrics {} already prepared.".format(prepared_metrics))
         self.logger.info("Metrics {} will be prepared.".format(metrics_to_prepare))
         # evaluate and record the metric values
-        self._prepare_metrics(metrics=metrics_to_prepare)
-
+        for item in tqdm(self.items, desc=f'Preparing metrics',):
+            for cand in item['candidates']:
+                for metric in metrics_to_prepare:
+                    # only compute the metric if it is not computed yet
+                    if metric not in cand['scores']:
+                        cand['scores'][metric] = Support.evaluate(hypothesis=cand['text'], reference=item['target'], metric=metric)
         self.logger.info('Finish preparing metrics {}.'.format(metrics_to_prepare))
         self.logger.info('The current available metrics are {}'.format(self.prepared_metrics))
 

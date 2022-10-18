@@ -373,8 +373,10 @@ class FiDBART(transformers.BartForConditionalGeneration):
         if past is not None:
             decoder_input_ids = decoder_input_ids[:, -1:]
 
+
         # expand the encoder attention mask for generation
         fused_attention_mask = self.encoder.get_attention_mask_for_decoder()
+
         expand_size = attention_mask.size(0) // fused_attention_mask.size(0) # i.e. beam size
         original_batch_size = fused_attention_mask.size(0)
         expanded_return_idx = (

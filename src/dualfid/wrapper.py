@@ -34,7 +34,10 @@ class FiDEncoderWrapper(torch.nn.Module):
 
         # auxiliary layer
         if self.use_aux_loss:
-            self.auxiliary_layer = MoERegression(n_tasks, d_model, d_model)
+            self.auxiliary_layer = MoERegression(
+                n_tasks=n_tasks,
+                input_size=d_model,
+                hidden_size=d_model,)
 
         # # the following are used to save the intermediate results
         self.n_ctx = None # number of fused pairs of source encoder and candidates
@@ -85,6 +88,7 @@ class FiDEncoderWrapper(torch.nn.Module):
                     self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, attention_mask), dim=0)
             else:
                 last_hidden_states = outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1)
+                attention_mask = attention_mask.reshape(bsz, self.n_ctx*fuse_length)
                 if self.encoder_attention_masks_used:
                     self.encoder_attention_masks = attention_mask
                     self.encoder_attention_masks_used = False

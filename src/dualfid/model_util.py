@@ -1,3 +1,4 @@
+from aiohttp import DataQueue
 import torch
 import torch.nn.functional as F
 from dualfid.data import Dataset

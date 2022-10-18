@@ -147,6 +147,16 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
         with open(data_path, 'r') as fin:
             data = json.load(fin)
     examples = []
+
+    # debug
+    for item in data:
+        for candidate in item['candidates']:
+            candidate['scores'] = {
+                "rouge1": candidate['scores']['rouge1'],
+                "rouge2": candidate['scores']['rouge2'],
+                "rougeL": candidate['scores']['rougeL'],
+            }
+
     if n_tasks < 0:
         n_tasks = len(data[0]['candidates'][0]['scores'])
     for k, example in enumerate(data):
