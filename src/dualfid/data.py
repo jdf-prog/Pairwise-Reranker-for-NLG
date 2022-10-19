@@ -127,7 +127,7 @@ class FiDCollator(object):
         target_ids = target_ids.masked_fill(~target_mask, -100)
         # encode FiD texts
         def append_candidates(example):
-            return [candidate + " " + example['source'] for candidate in example['candidates']]
+            return [example['source'] + " " + candidate for candidate in example['candidates']]
         texts = [append_candidates(example) for example in batch]
         context_ids, context_masks = encode_batch_text(texts,
             self.tokenizer,
@@ -156,6 +156,7 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
                 "rouge2": candidate['scores']['rouge2'],
                 "rougeL": candidate['scores']['rougeL'],
             }
+        item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] == "diverse_beam_search" and candidate['model'] == 'bart_cnndm'] # debug
 
     if n_tasks < 0:
         n_tasks = len(data[0]['candidates'][0]['scores'])

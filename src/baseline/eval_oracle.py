@@ -4,6 +4,8 @@
 import argparse
 import sys
 import os
+import psutil
+from tqdm.contrib.concurrent import process_map
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.data import (
@@ -18,6 +20,7 @@ from common.utils import (
 )
 from pathlib import Path
 
+
 def main(args):
     # seed
     seed_everything(args.seed)
@@ -30,7 +33,7 @@ def main(args):
     to_load_types = set(types) - set(ds.candidate_counts.keys())
     for model_name, generation_method in to_load_types:
         print("Loading candidates from -- model:{} \t generation method:{}".format(model_name, generation_method))
-        candidates = load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
+        candidates= load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
         ds.add_candidates(model_name, generation_method, candidates)
 
     # prepare metrics
@@ -41,9 +44,7 @@ def main(args):
         metrics.extend(["bleu"])
     if args.eval_bleurt:
         metrics.extend(["bleurt"])
-    if args.eval_bertscore:
-        metrics.extend(["bertscore"])
-    ds.prepare_metrics(metrics)
+    ds.prepare_metrics(metrics, args.num_workers)
     save_prepared_dataset(args.dataset, args.set, ds)
 
     # analyze the oracle
@@ -55,11 +56,11 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="cnn_dailymail")
     parser.add_argument("--set", type=str, default="val")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num_workers", type=int, default=1)
     # metrics
     parser.add_argument('--eval_rouge', type = str2bool, default = True)
     parser.add_argument('--eval_bleu', type = str2bool, default = True)
     parser.add_argument('--eval_bleurt', type = str2bool, default = False)
-    parser.add_argument('--eval_bertscore', type = str2bool, default = False)
     args = parser.parse_args()
     print(args)
     main(args)

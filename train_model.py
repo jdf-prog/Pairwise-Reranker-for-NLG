@@ -117,8 +117,11 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                     'epoch': epoch,
                     'train_loss': train_loss,
                     'generation_loss': generation_loss,
-                    'aux_loss': aux_loss,
                 })
+                if opt.use_aux_loss:
+                    wandb_log.update({
+                        'aux_loss': aux_loss
+                    })
                 if opt.use_dual_encoder:
                     wandb_log.update({
                         "source_encoder_lr": scheduler.get_lr()[0],
@@ -228,7 +231,7 @@ if __name__ == "__main__":
         n_tasks=opt.n_tasks,
     )
     train_dataset = src.dualfid.data.Dataset(train_examples, opt.n_candidate)
-    augment_training_data(train_dataset)
+    # augment_training_data(train_dataset) # debug
     # use golbal rank and world size to split the eval set on multiple gpus
     eval_examples = src.dualfid.data.load_data(
         opt.eval_data,

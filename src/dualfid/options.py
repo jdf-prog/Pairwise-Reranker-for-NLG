@@ -22,7 +22,9 @@ class Options():
         self.parser.add_argument('--candidate_maxlength', type=int, default=-1,
                         help='maximum number of tokens in candidate text, no truncation if -1')
         self.parser.add_argument('--model_size', type=str, default='base')
-        self.parser.add_argument('--model_type', type=str, choices=['t5', 'bart', 'dualbart', 'dualt5'], default='t5')
+        self.parser.add_argument('--model_type', type=str, choices=[
+            't5', 'bart', 'dualbart', 'dualt5'
+        ], default='t5')
         self.parser.add_argument('--n_candidate', type=int, default=1)
         self.parser.add_argument('--top_k_candidates', type=int, default=-1,
                         help='number of candidates to be selected by the auxliary layer, -1 means no selection')

@@ -16,13 +16,14 @@ model_type='bart'
 model_size="large"
 name="diverse_beam_search"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
-source_maxlength=512
-candidate_maxlength=200
+source_maxlength=1024
+candidate_maxlength=128
 
 echo "model type: ${model_type}"
 echo "model size: ${model_size}"
 echo "name: ${name}"
-echo "text_maxlength: ${text_maxlength}"
+echo "source_maxlength: ${source_maxlength}"
+echo "candidate_maxlength: ${candidate_maxlength}"
 
 nvidia-smi
 # torchrun --nproc_per_node=$NGPU \

@@ -21,6 +21,7 @@ from dualfid.wrapper import (
     FiDEncoderWrapper,
     DualFiDEncoderWrapper,
     DecoderWrapper,
+    PCDualFiDEncoderWrapper,
 )
 from dualfid.model_util import (
     regression_BCE_loss,
@@ -514,5 +515,3 @@ class FiDT5(transformers.T5ForConditionalGeneration):
             "cross_attn_head_mask": cross_attn_head_mask,
             "use_cache": use_cache,
         }
-
-

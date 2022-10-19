@@ -13,6 +13,11 @@ from dualfid.layers import (
 )
 import numpy as np
 from pytorch_metric_learning import distances
+from transformers.models.bart.modeling_bart import shift_tokens_right
+from transformers.modeling_outputs import (
+    BaseModelOutput,
+    BaseModelOutputWithPastAndCrossAttentions,
+)
 
 class FiDEncoderWrapper(torch.nn.Module):
     """
@@ -43,8 +48,8 @@ class FiDEncoderWrapper(torch.nn.Module):
         self.n_ctx = None # number of fused pairs of source encoder and candidates
         self.preds = None
         self.aux_loss = None
-        self.encoder_attention_masks = None
-        self.encoder_attention_masks_used = True
+        self.encoder_attention_mask = None
+        self.encoder_attention_mask_used = True
 
     def forward(
         self,
@@ -81,19 +86,19 @@ class FiDEncoderWrapper(torch.nn.Module):
                 attention_mask = attention_mask.reshape(bsz, self.n_ctx, fuse_length)
                 attention_mask = attention_mask[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length]
                 attention_mask = attention_mask.reshape(bsz, self.top_k_candidates*fuse_length)
-                if self.encoder_attention_masks_used:
-                    self.encoder_attention_masks = attention_mask
-                    self.encoder_attention_masks_used = False
+                if self.encoder_attention_mask_used:
+                    self.encoder_attention_mask = attention_mask
+                    self.encoder_attention_mask_used = False
                 else:
-                    self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, attention_mask), dim=0)
+                    self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, attention_mask), dim=0)
             else:
                 last_hidden_states = outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1)
                 attention_mask = attention_mask.reshape(bsz, self.n_ctx*fuse_length)
-                if self.encoder_attention_masks_used:
-                    self.encoder_attention_masks = attention_mask
-                    self.encoder_attention_masks_used = False
+                if self.encoder_attention_mask_used:
+                    self.encoder_attention_mask = attention_mask
+                    self.encoder_attention_mask_used = False
                 else:
-                    self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, attention_mask), dim=0)
+                    self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, attention_mask), dim=0)
 
 
         outputs = (last_hidden_states, ) + outputs[1:]
@@ -127,10 +132,10 @@ class FiDEncoderWrapper(torch.nn.Module):
             Get the attention mask for the decoder after
             fused the hidden states of encoder1 and encoder2
         """
-        if self.encoder_attention_masks is None:
+        if self.encoder_attention_mask is None:
             raise ValueError("encoder_attention_mask is not set, please run forward first")
-        self.encoder_attention_masks_used = True
-        return self.encoder_attention_masks
+        self.encoder_attention_mask_used = True
+        return self.encoder_attention_mask
 
 class DualFiDEncoderWrapper(torch.nn.Module):
     """
@@ -168,8 +173,8 @@ class DualFiDEncoderWrapper(torch.nn.Module):
 
         # auxiliary layers
         if self.use_aux_loss:
-            self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
-            # self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
+            # self.multi_task_layer = ModelMultitaskRegression(n_tasks, 2 * d_model, d_model)
+            self.multi_task_layer = MoERegression(n_tasks, 2 * d_model, d_model)
             # self.dist = distances.CosineSimilarity()
 
         # the following are used to save the intermediate results
@@ -179,8 +184,8 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         self.source_cls_embedding = None
         self.candidate_cls_embedding = None
         self.top_k_indices = None
-        self.encoder_attention_masks = None
-        self.encoder_attention_masks_used = True
+        self.encoder_attention_mask = None
+        self.encoder_attention_mask_used = True
 
     def reduce_padding(self, input_ids, attention_mask):
         """
@@ -296,16 +301,16 @@ class DualFiDEncoderWrapper(torch.nn.Module):
             encoder1_outputs[0],
             encoder2_outputs[0]
         )
-        encoder_attention_masks = self._concantenate_shape(
+        encoder_attention_mask = self._concantenate_shape(
             source_attention_mask.reshape(bsz, source_length, 1),
             candidate_attention_mask.reshape(bsz*(self.n_ctx-1), candidate_length, 1)
         ).reshape(bsz, -1)
         # save for cross attention in the deocder
-        if self.encoder_attention_masks_used:
-            self.encoder_attention_masks = encoder_attention_masks
+        if self.encoder_attention_mask_used:
+            self.encoder_attention_mask = encoder_attention_mask
         else:
-            self.encoder_attention_masks = torch.cat((self.encoder_attention_masks, encoder_attention_masks), dim=0)
-        # encoder_hidden_states = encoder_hidden_states.detach() # NOTE: debug, detach the encoder and decoder
+            self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, encoder_attention_mask), dim=0)
+        encoder_hidden_states = encoder_hidden_states.detach() # NOTE: debug, detach the encoder and decoder
         outputs += (encoder_hidden_states,)
 
         # 2. all hidden states
@@ -366,10 +371,10 @@ class DualFiDEncoderWrapper(torch.nn.Module):
             Get the attention mask for the decoder after
             fused the hidden states of encoder1 and encoder2
         """
-        if self.encoder_attention_masks is None:
+        if self.encoder_attention_mask is None:
             raise ValueError("encoder_attention_mask is not set, please run forward first")
-        self.encoder_attention_masks_used = True
-        return self.encoder_attention_masks
+        self.encoder_attention_mask_used = True
+        return self.encoder_attention_mask
 
 
     def get_multi_task_layer_output(self):
@@ -423,4 +428,3 @@ class DecoderWrapper(torch.nn.Module):
             encoder_attention_mask,
             **kwargs
         )
-

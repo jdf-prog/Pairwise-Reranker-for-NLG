@@ -15,15 +15,16 @@ test_data_path="./data/prepared/cnndm/test/dataset.jsonl"
 
 model_type='bart'
 model_size="large"
-name="DBM_sel_gen_10to10_mixed_aug"
+name="half_avg"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
-source_maxlength=512
-candidate_maxlength=200
+source_maxlength=768
+candidate_maxlength=128
 
 echo "model type: ${model_type}"
 echo "model size: ${model_size}"
 echo "name: ${name}"
-echo "text_maxlength: ${text_maxlength}"
+echo "source_maxlength: ${source_maxlength}"
+echo "candidate_maxlength: ${candidate_maxlength}"
 
 nvidia-smi
 # torchrun --nproc_per_node=$NGPU \
@@ -45,7 +46,8 @@ python \
         --n_candidate 10 \
         --total_step 25000 \
         --warmup_step 3000 \
-        --main_port 19001 \
-        --accumulation_steps 3 \
-        --use_aux_loss \
+        --main_port 19003 \
+        --accumulation_steps 2 \
+        --top_k_candidates 5 \
+        --use_aux_loss
 

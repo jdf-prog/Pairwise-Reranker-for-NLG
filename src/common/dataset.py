@@ -11,10 +11,13 @@ import multiprocess as mp
 import psutil
 
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 from typing import Counter, List, Dict, Tuple, Union, Optional, Set
 from collections import Counter
 from common.evaluation import (
-    Support
+    overall_eval,
+    overall_eval_multi_process,
+    SUPPORTED_METRICS,
 )
 class CustomDataset:
 
@@ -31,7 +34,7 @@ class CustomDataset:
         self._set_logger()
         self.self_check()
 
-    def prepare_metrics(self, metrics:List[str]=None):
+    def prepare_metrics(self, metrics:List[str]=None, num_workers:int=1):
         """
         prepare the dataset for reranking.
         This function computes all the metrics value of each candidate for each source.
@@ -45,8 +48,7 @@ class CustomDataset:
             self.logger.info('No metrics specified. End preparing')
 
         # prepare the hugging face metric evaluator
-        for metric in metrics:
-            Support.check_metric_support(metric)
+        assert set(metrics).issubset(set(SUPPORTED_METRICS)), "Unsupported metrics: {}".format(set(metrics) - set(SUPPORTED_METRICS))
 
         prepared_metrics = self.prepared_metrics
         metrics_to_prepare = set(metrics) - set(prepared_metrics)
@@ -54,17 +56,38 @@ class CustomDataset:
         self.logger.info("Metrics {} already prepared.".format(prepared_metrics))
         self.logger.info("Metrics {} will be prepared.".format(metrics_to_prepare))
         # evaluate and record the metric values
-        for item in tqdm(self.items, desc=f'Preparing metrics',):
-            for cand in item['candidates']:
-                for metric in metrics_to_prepare:
-                    # only compute the metric if it is not computed yet
-                    if metric not in cand['scores']:
-                        cand['scores'][metric] = Support.evaluate(hypothesis=cand['text'], reference=item['target'], metric=metric)
+        candidates = [[c['text'] for c in item['candidates']] for item in self.items]
+        targets = [item['target'] for item in self.items]
+        if num_workers > 1:
+            cpu_num = psutil.cpu_count(logical=False)
+            num_workers = min(num_workers, cpu_num)
+            self.logger.info("Using {} workers to evaluate".format(num_workers))
+            chunk_size = len(candidates) // num_workers + 1
+            candidates_chunks = [candidates[i:i + chunk_size] for i in range(0, len(candidates), chunk_size)]
+            targets_chunks = [targets[i:i + chunk_size] for i in range(0, len(targets), chunk_size)]
+            datas = [(candidates_chunks[i], targets_chunks[i], metrics) for i in range(len(candidates_chunks))]
+            scores_chunks = process_map(overall_eval_multi_process, datas, chunksize=1, max_workers=num_workers)
+            scores = {}
+            for chunk in scores_chunks:
+                for k, v in chunk.items():
+                    scores[k] = scores.get(k, []) + v
+        else:
+            scores = overall_eval(candidates, targets, metrics)
+
+        for i, item in enumerate(self.items):
+            for j, cand in enumerate(item['candidates']):
+                for metric in metrics:
+                    cand['scores'][metric] = scores[metric][i][j]
+
         self.logger.info('Finish preparing metrics {}.'.format(metrics_to_prepare))
         self.logger.info('The current available metrics are {}'.format(self.prepared_metrics))
 
 
-    def add_candidates(self, model:str, generation_method: str, candidates:Union[List[str], List[List[str]]]):
+    def add_candidates(
+        self,
+        model:str,
+        generation_method: str,
+        candidates:Union[List[str], List[List[str]]],):
         """
         Add candidates from the model to the data.
 

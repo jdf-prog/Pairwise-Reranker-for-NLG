@@ -11,7 +11,8 @@ def regression_BCE_loss(x, aux_loss, scores):
         loss = torch.tensor(aux_loss).to(x.device)
     else:
         loss = torch.tensor(0.0).to(x.device)
-    labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device)
+    # labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device) # only the best one
+    labels = torch.gt(scores, torch.mean(scores, dim=1, keepdim=True)[0]).float().to(x.device) # select half of the best ones
     loss = F.binary_cross_entropy(x, labels, reduction='mean')
     return torch.sum(x, dim=-1), loss
 
