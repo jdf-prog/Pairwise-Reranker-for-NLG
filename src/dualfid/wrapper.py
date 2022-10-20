@@ -216,7 +216,7 @@ class DualFiDEncoderWrapper(torch.nn.Module):
         inputs = torch.cat((
             source_cls_embed.unsqueeze(1).repeat(1, n_candidates, 1),
             candidate_cls_embed
-        ), dim=-1)
+        ), dim=-1).detach() # debug
         preds, aux_loss = self.multi_task_layer(inputs)
         # save the pred scores for loss computation
         if self.preds is None:
@@ -310,7 +310,6 @@ class DualFiDEncoderWrapper(torch.nn.Module):
             self.encoder_attention_mask = encoder_attention_mask
         else:
             self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, encoder_attention_mask), dim=0)
-        encoder_hidden_states = encoder_hidden_states.detach() # NOTE: debug, detach the encoder and decoder
         outputs += (encoder_hidden_states,)
 
         # 2. all hidden states

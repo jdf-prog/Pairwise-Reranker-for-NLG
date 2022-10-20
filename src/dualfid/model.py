@@ -21,7 +21,6 @@ from dualfid.wrapper import (
     FiDEncoderWrapper,
     DualFiDEncoderWrapper,
     DecoderWrapper,
-    PCDualFiDEncoderWrapper,
 )
 from dualfid.model_util import (
     regression_BCE_loss,

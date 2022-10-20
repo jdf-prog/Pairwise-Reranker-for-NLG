@@ -17,7 +17,7 @@ model_type='bart'
 model_size="large"
 name="half_avg"
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
-source_maxlength=768
+source_maxlength=512
 candidate_maxlength=128
 
 echo "model type: ${model_type}"
