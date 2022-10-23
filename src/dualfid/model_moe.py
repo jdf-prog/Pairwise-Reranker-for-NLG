@@ -207,16 +207,6 @@ class MLPExpert(nn.Module):
         return out
 
 
-class MLPTower(nn.Module):
-    def __init__(self, input_size):
-        super(MLPTower, self).__init__()
-        self.fc = nn.Linear(input_size, 1)
-
-    def forward(self, x):
-        out = self.fc(x)
-        return out
-
-
 class SparseDispatcher(object):
     """Helper for implementing a mixture of experts.
     The purpose of this class is to create input minibatches for the

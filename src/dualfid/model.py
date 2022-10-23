@@ -8,15 +8,12 @@
 # https://github.com/facebookresearch/FiD
 # We thank the authors for their great work.
 
-import sys
 import transformers
 import torch
 import torch.nn as nn
 import numpy as np
 import copy
 import torch.nn.functional as F
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dualfid.wrapper import (
     FiDEncoderWrapper,
     DualFiDEncoderWrapper,
@@ -514,3 +511,6 @@ class FiDT5(transformers.T5ForConditionalGeneration):
             "cross_attn_head_mask": cross_attn_head_mask,
             "use_cache": use_cache,
         }
+
+
+

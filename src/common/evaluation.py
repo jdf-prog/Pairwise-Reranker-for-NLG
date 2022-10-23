@@ -7,11 +7,17 @@ from typing import List, Optional, Union, Dict, Tuple
 from absl import logging
 from torch import split
 from tqdm import tqdm
+from nltk import sent_tokenize
 from rouge_score import rouge_scorer
 logging.set_verbosity(logging.WARNING)
 
 
 SUPPORTED_METRICS = ['rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bleu', 'bleurt']
+
+def pre_rouge_processing(summary):
+    summary = summary.replace("<n>", " ")
+    summary = "\n".join(sent_tokenize(summary))
+    return summary
 
 def eval_rouge(
     hypotheses: List[List[str]],
@@ -31,13 +37,16 @@ def eval_rouge(
         key is the rouge type, value is the rouge score, in same shape with hypotheses.
     """
     assert len(hypotheses) == len(references)
+    for i in range(len(hypotheses)):
+        if isinstance(hypotheses[i], str):
+            hypotheses[i] = [hypotheses[i]]
     assert set(rouge_types) <= set(['rouge1', 'rouge2', 'rougeL', 'rougeLsum']), "Rouge types should be in ['rouge1', 'rouge2', 'rougeL', 'rougeLsum']"
-    scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=True, split_summaries=True)
+    scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=True)
     rouge_scores = {rouge_type: [[] for _ in range(len(hypotheses))] for rouge_type in rouge_types}
     with tqdm(total=len(hypotheses), desc="Evaluating rouge") as pbar:
         for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
             for hypo in hypo_group:
-                scores = scorer.score(ref, hypo)
+                scores = scorer.score(ref, pre_rouge_processing(hypo))
                 for rouge_type in rouge_types:
                     rouge_scores[rouge_type][i].append(scores.get(rouge_type).fmeasure)
             pbar.update(1)

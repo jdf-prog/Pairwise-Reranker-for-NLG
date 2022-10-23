@@ -16,7 +16,7 @@ class Dataset(torch.utils.data.Dataset):
                  source_prefix='source text: ',
                  candidate_prefix='candidate text: '):
         self.data = data
-        self.n_candidate = n_candidate
+        self.n_candidate = n_candidate if n_candidate is not None and n_candidate > 0 else None
         self.source_prefix = source_prefix
         self.candidate_prefix = candidate_prefix
         self.n_tasks = len(self.data[0]['candidates'][0]['scores']) if 'candidates' in self.data[0] else -1
@@ -46,6 +46,13 @@ class Dataset(torch.utils.data.Dataset):
         return self.data[index]
 
 def encode_batch_text(batch_texts, tokenizer, max_length):
+    """
+    Args:
+        batch_texts List[str]: [batch_size, n_texts]
+    Returns:
+        batch_input_ids: [batch_size, n_texts, max_length]
+        batch_attention_mask: [batch_size, n_texts, max_length]
+    """
     encoded_ids, encoded_masks = [], []
     for k, texts in enumerate(batch_texts):
         p = tokenizer.batch_encode_plus(
@@ -61,6 +68,69 @@ def encode_batch_text(batch_texts, tokenizer, max_length):
     encoded_ids = torch.cat(encoded_ids, dim=0)
     encoded_masks = torch.cat(encoded_masks, dim=0)
     return encoded_ids, encoded_masks.bool()
+
+def get_truncated_text(texts, tokenizer, max_length):
+    """
+        Truncate the texts to max_length
+    """
+    truncated_texts = []
+    for text in texts:
+        tokens = tokenizer.tokenize(text)
+        tokens = tokens[:max_length]
+        truncated_texts.append(tokenizer.convert_tokens_to_string(tokens))
+    return truncated_texts
+
+class SCRCollator(object):
+    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+        self.tokenizer = tokenizer
+        self.source_maxlength = source_maxlength
+        self.candidate_maxlength = candidate_maxlength
+
+        self.sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else tokenizer.eos_token
+        self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
+        assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
+        self.cls_token = self.cls_token if self.cls_token is not None else ""
+        self.separate_token = self.sep_token + ' ' + self.cls_token # used to separate 2 concatenated texts
+        self.postfix = postfix
+        self.max_length = self.source_maxlength + self.candidate_maxlength + 3 # 3 is for [CLS] and 2 [SEP] tokens
+        self.target_maxlength = self.candidate_maxlength + 2 # 2 is for [CLS] and [SEP] tokens
+        if self.postfix is not None:
+            self.max_length += len(self.tokenizer.tokenize(self.postfix))
+
+
+    def __call__(self, batch):
+        batch_size = len(batch)
+        batch_source = [b['source'] for b in batch]
+        batch_target = [b['target'] for b in batch]
+        batch_candidates = [b['candidates'] for b in batch]
+        batch_scores = [b['scores'] for b in batch]
+        batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
+        batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
+
+        if self.postfix is not None:
+            texts = [[self.separate_token.join([s, c, self.postfix]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
+        else:
+            texts = [[self.separate_token.join([s, c]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
+
+        encoded_text_ids, encoded_text_masks = encode_batch_text(texts, self.tokenizer, self.max_length)
+        target_encodings = self.tokenizer.batch_encode_plus(
+            batch_target,
+            max_length=self.target_maxlength,
+            padding='max_length',
+            return_tensors='pt',
+            truncation=True
+        )
+        encoded_target_ids = target_encodings['input_ids']
+        encoded_target_masks = target_encodings['attention_mask']
+
+
+        return {
+            'input_ids' : encoded_text_ids,
+            'input_masks' : encoded_text_masks,
+            'target_ids' : encoded_target_ids,
+            'target_masks' : encoded_target_masks,
+            'scores' : torch.stack(batch_scores, dim=0),
+        }
 
 class DualFiDCollator(object):
     def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
@@ -138,7 +208,7 @@ class FiDCollator(object):
         return (index, target_ids, target_mask, context_ids, context_masks, scores)
 
 def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
-    assert data_path
+    assert data_path, "data_path is not specified"
     print("Loading data from {}".format(data_path))
     if data_path.endswith('.jsonl'):
         with open(data_path) as f:
@@ -148,7 +218,7 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
             data = json.load(fin)
     examples = []
 
-    # debug
+    # debug, sort the keys in the right order
     for item in data:
         for candidate in item['candidates']:
             candidate['scores'] = {
@@ -156,6 +226,7 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
                 "rouge2": candidate['scores']['rouge2'],
                 "rougeL": candidate['scores']['rougeL'],
             }
+
         item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] == "diverse_beam_search" and candidate['model'] == 'bart_cnndm'] # debug
 
     if n_tasks < 0:
@@ -188,3 +259,13 @@ def check_scores(examples):
     for task in task_names:
         print(f"Candidate mean scores for task '{task}' are {candidate_scores[task]}")
 
+
+def get_data_collator(model_type:str):
+    if model_type == "fid":
+        return FiDCollator
+    elif model_type == "dualfid":
+        return DualFiDCollator
+    elif model_type == "scr":
+        return SCRCollator
+    else:
+        raise ValueError(f"model_type {model_type} not supported")

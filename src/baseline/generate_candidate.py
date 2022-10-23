@@ -48,7 +48,10 @@ parser.add_argument('--model_type', type = str, default = "pegasus",
                     choices=["pegasus", "bart"])
 parser.add_argument('--model', type = str, default = "google/pegasus-large",
                     choices = ["google/pegasus-large", "google/pegasus-cnn_dailymail", "google/pegasus-xsum",
-                    "facebook/bart-large", "facebook/bart-large-cnn", "facebook/bart-large-xsum"])
+                    "facebook/bart-large", "facebook/bart-large-cnn", "facebook/bart-large-xsum",
+                    "Helsinki-NLP/opus-mt-zh-en", "Helsinki-NLP/opus-mt-de-en", "Helsinki-NLP/opus-mt-it-en",
+                    "facebook/nllb-200-3.3B", "facebook/nllb-200-1.3B", "facebook/nllb-200-distilled-1.3B", "facebook/nllb-200-distilled-600M",
+                    "facebook/m2m100_1.2B", "facebook/m2m100_418M"])
 parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1",
                     choices = ["pegasus_unsupervised", "bart_unsupervised",
                     "pegasus_cnndm_first_half_shuffled_1", "pegasus_cnndm_second_half_shuffled_1", "pegasus_cnndm",
@@ -56,7 +59,8 @@ parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1"
                     "pegasus_xsum_first_half_shuffled_1", "pegasus_xsum_second_half_shuffled_1", "pegasus_xsum",
                     "bart_xsum_first_half_shuffled_1", "bart_xsum_second_half_shuffled_1", "bart_xsum",
                     "pegasus_reddit_first_half_shuffled_1", "pegasus_reddit_second_half_shuffled_1", "pegasus_reddit_train_1",
-                    "bart_reddit_first_half_shuffled_1", "bart_reddit_second_half_shuffled_1", "bart_reddit_train_1"])
+                    "bart_reddit_first_half_shuffled_1", "bart_reddit_second_half_shuffled_1", "bart_reddit_train_1",
+                    "opus_mt", "nllb", "m2m100"])
 parser.add_argument('--load_model', type = str2bool, default = False)
 parser.add_argument('--load_model_path', type = str,
                     default = "../base_model_finetuning/ft_saved_models/reddit/pegasus_reddit_train_1/checkpoint-5/pytorch_model.bin") # todo: change to where you saved the finetuned checkpoint

@@ -1,7 +1,16 @@
-from aiohttp import DataQueue
 import torch
 import torch.nn.functional as F
 from dualfid.data import Dataset
+from dualfid.reranker import (
+    SCR,
+    T5SCR,
+    DualReranker
+)
+from transformers import (
+    RobertaModel,
+    BertModel,
+    T5ForConditionalGeneration
+)
 def regression_BCE_loss(x, aux_loss, scores):
 
     scores = scores.to(x.device)
@@ -27,3 +36,52 @@ def augment_training_data(dataset: Dataset):
             augment_item['target'] = candidate['text']
             augment_data.append(augment_item)
     dataset.data = augment_data
+
+def build_pretrained_model(model_type, model_name, cache_dir=None):
+    model = None
+    if model_type.startswith("roberta"):
+        print("\nUsing RoBERTa model")
+        model = RobertaModel.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("bert"):
+        print("\nUsing BERT model")
+        model = BertModel.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("t5"):
+        print("\nUsing T5 model")
+        model = T5ForConditionalGeneration.from_pretrained(model_name, cache_dir = cache_dir)
+    return model
+
+def build_tokenizer(model_type, model_name, cache_dir=None):
+    tokenizer = None
+    if model_type.startswith("roberta"):
+        print("\nUsing RoBERTa tokenizer")
+        from transformers import RobertaTokenizerFast
+        tokenizer = RobertaTokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("bert"):
+        print("\nUsing BERT tokenizer")
+        from transformers import BertTokenizerFast
+        tokenizer = BertTokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("t5"):
+        print("\nUsing T5 tokenizer")
+        from transformers import T5TokenizerFast
+        tokenizer = T5TokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
+    return tokenizer
+
+def build_reranker(reranker_type, model_type, model_name, cache_dir, **kwargs):
+    reranker = None
+    pretrained_model = build_pretrained_model(model_type, model_name, cache_dir)
+
+    if reranker_type == "scr":
+        n_task = kwargs.get("n_task") # kwargs: n_tasks, when training
+        if model_type.startswith("t5"):
+            reranker = T5SCR(pretrained_model, n_task)
+        else:
+            reranker = SCR(pretrained_model, n_task)
+
+    elif reranker_type == "dual":
+        reranker = DualReranker(pretrained_model)
+    return reranker
+
+def build_reranker_from_checkpoint(reranker_type, model_type, model_name, cache_dir, checkpoint, **kwargs):
+    reranker = build_reranker(reranker_type, model_type, model_name, cache_dir, **kwargs)
+    reranker.load_state_dict(torch.load(checkpoint))
+    return reranker
