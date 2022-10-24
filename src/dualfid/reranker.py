@@ -1,3 +1,4 @@
+from enum import unique
 import sys
 import transformers
 import torch
@@ -9,8 +10,8 @@ import os
 from dualfid.layers import (
     MoE,
 )
+from copy import deepcopy
 import transformers.trainer
-
 from torch.nn import (
     MSELoss,
     BCEWithLogitsLoss,
@@ -35,8 +36,13 @@ class SCR(nn.Module):
 
         See SummaReranker, Refsum, BRIO for details
     """
-    def __init__(self, pretrained_model, n_tasks=3):
+    def __init__(self, pretrained_model, config):
         super(SCR, self).__init__()
+        self.config = config
+        self.n_tasks = self.config.n_tasks
+        self.num_pos = self.config.num_pos
+        self.num_neg = self.config.num_neg
+
         # LM
         self.pretrained_model = pretrained_model
         self.hidden_size = self.pretrained_model.config.hidden_size
@@ -46,9 +52,9 @@ class SCR(nn.Module):
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
         # MoE
-        self.moe = MoE(n_tasks, self.hidden_size, self.hidden_size, 2*n_tasks, self.hidden_size, k=n_tasks)
+        self.moe = MoE(self.n_tasks, self.hidden_size, self.hidden_size, 2*self.n_tasks, self.hidden_size, k=self.n_tasks)
         # towers - one for each task
-        self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(n_tasks)])
+        self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
         self.sigmoid = nn.Sigmoid()
 
         self.loss = nn.BCEWithLogitsLoss()
@@ -60,8 +66,14 @@ class SCR(nn.Module):
             attention_mask: [batch_size, n_candidate, seq_len]
             scores: [batch_size, n_candidate, n_task]
         """
+        # sub sampling candidates
+        if self.training:
+            input_ids, attention_mask, scores = \
+                sub_sampling(input_ids, attention_mask, scores, self.num_pos, self.num_neg)
 
         loss = torch.tensor(0.0).to(input_ids.device)
+
+
         batch_size, n_candidate, seq_len = input_ids.shape
         n_task = scores.shape[-1]
 
@@ -87,8 +99,9 @@ class SCR(nn.Module):
         loss = self.loss(pred_scores_for_n_tasks, labels_for_n_tasks)
 
         # return loss and logits
-        pred_scores_for_n_tasks = \
-            self.sigmoid(pred_scores_for_n_tasks).reshape(batch_size, n_candidate, -1) # to output
+        pred_scores_for_n_tasks = torch.sum(
+            self.sigmoid(pred_scores_for_n_tasks).reshape(batch_size, n_candidate, -1)
+        , dim=-1) # to output, [batch_size, n_candidate]
         outputs = {
             "loss": loss + aux_loss,
             "preds": pred_scores_for_n_tasks,
@@ -130,15 +143,98 @@ class DualReranker(nn.Module):
             3. negative log likelihood base on softmax (NLL)
             4. cosine similarity (Cos)
 
-        Using Contrastive Loss function
-            1. NT-Xent
-            2. InfoNCE from SimCLR
+        Using Loss function
+            1. InfoNCE from SimCLR (Contrastive)
+            2. ListMLE (Liswise ranking)
             3. MoCo (momentum contrastive)
             4. BYOL (bootstrap your own latent)
             5. Barlow Twins
 
         See DPR for details
     """
+    def __init__(self, pretrained_model, config):
+        super(DualReranker, self).__init__()
+        self.config = config
+        self.num_pos = self.config.num_pos
+        self.num_neg = self.config.num_neg
+
+        # LM
+        self.source_encoder = pretrained_model
+        self.candidate_encoder = deepcopy(pretrained_model)
+        self.hidden_size = self.source_encoder.config.hidden_size
+        self.sigmoid = nn.Sigmoid()
+
+    def infoNCE_loss(self, source_enc, candidate_enc, labels, temperature=0.07):
+        """
+            InfoNCE loss
+            See paper: https://arxiv.org/abs/2002.05709
+        Args:
+            source_enc: [batch_size, hidden_size]
+            candidate_enc: [batch_size, n_candidate, hidden_size]
+            labels: [batch_size, n_candidate]
+        """
+        batch_size, n_candidate, hidden_size = candidate_enc.shape
+        # normalize
+        source_enc = F.normalize(source_enc, dim=-1).reshape(batch_size, 1, hidden_size)
+        candidate_enc = F.normalize(candidate_enc, dim=-1)
+        # compute similarity matrix
+        sim_mat = torch.matmul(source_enc, candidate_enc.transpose(1, 2)).squeeze(1) # [batch_size, n_candidate]
+        # compute info loss
+        pos_sim = torch.sum(sim_mat * labels, dim=-1)
+        pos_sim = torch.exp(pos_sim / temperature)
+        neg_sim = torch.sum(sim_mat * (1 - labels), dim=-1)
+        neg_sim = torch.exp(neg_sim / temperature)
+        loss = -torch.log(pos_sim / (pos_sim + neg_sim)).mean()
+        return loss, sim_mat
+
+    def ListMLE_loss(self, source_enc, candidate_enc, labels):
+        pass
+
+    def forward(self, source_ids, source_attention_mask, candidate_ids, candidate_attention_mask, scores):
+        """
+        Args:
+            source_ids: [batch_size, seq_len]
+            source_attention_mask: [batch_size, seq_len]
+            candidate_ids: [batch_size, n_candidate, seq_len]
+            candidate_attention_mask: [batch_size, n_candidate, seq_len]
+            scores: [batch_size, n_candidate, n_task]
+        """
+        if self.training:
+            candidate_ids, candidate_attention_mask, scores = \
+                sub_sampling(candidate_ids, candidate_attention_mask, scores, self.num_pos, self.num_neg)
+
+        loss = torch.tensor(0.0).to(source_ids.device)
+        batch_size, n_candidate, candidate_seq_len = candidate_ids.shape
+        _, source_seq_len = source_ids.shape
+        n_task = scores.shape[-1]
+
+        source_ids = source_ids.view(-1, source_seq_len)
+        source_attention_mask = source_attention_mask.view(-1, source_seq_len)
+        candidate_ids = candidate_ids.view(-1, candidate_seq_len)
+        candidate_attention_mask = candidate_attention_mask.view(-1, candidate_seq_len)
+
+        source_encs = self.source_encoder(
+            input_ids=source_ids,
+            attention_mask=source_attention_mask,
+            output_hidden_states = True
+        )["last_hidden_state"][:, 0, :] # [batch_size, hidden_size]
+        candidate_encs = self.candidate_encoder(
+            input_ids=candidate_ids,
+            attention_mask=candidate_attention_mask,
+            output_hidden_states = True
+        )["last_hidden_state"][:, 0, :].reshape(batch_size, n_candidate, -1) # [batch_size, n_candidate, hidden_size]
+
+        # compute preds revalence using dot product
+        sum_scores = torch.sum(scores, dim=-1).to(source_ids.device) # [batch_size, n_candidate]
+        labels = torch.eq(sum_scores, torch.max(sum_scores, dim=1, keepdim=True)[0]).float() # only the best one, [batch_size, n_candidate]
+        # comput infoNCE loss
+        loss, sim_mat = self.infoNCE_loss(source_encs, candidate_encs, labels)
+
+        outputs = {
+            "loss": loss,
+            "preds": sim_mat,
+        }
+        return outputs
 
 class ListWiseReranker(nn.Module):
     """
@@ -229,5 +325,43 @@ class T5CompareGenReranker(nn.Module):
             5. Barlow Twins
     """
 
-
-
+def sub_sampling(input_ids, attention_mask, scores, num_pos, num_neg, mode="bottom"):
+    """
+    Args:
+        input_ids: [batch_size, n_candidate, seq_len]
+        attention_mask: [batch_size, n_candidate, seq_len]
+        scores: [batch_size, n_candidate, n_task]
+        num_pos: int
+        num_neg: int
+        mode: str, "bottom" or "random"
+    """
+    batch_size, n_candidate, seq_len = input_ids.shape
+    selected_idx = []
+    for i in range(batch_size):
+        idx = np.arange(n_candidate)
+        # remove duplicate candidates, cpu
+        unique_idx = []
+        unique_scores = []
+        for j, score in enumerate(torch.sum(scores[i], dim=-1)):
+            if score not in unique_scores:
+                unique_idx.append(idx[j])
+                unique_scores.append(score.item())
+        unique_idx = np.array(unique_idx)
+        unique_scores = np.array(unique_scores)
+        # only select a few pos and neg candidates
+        sorted_idx = np.argsort(unique_scores)[::-1]
+        pos_idx = sorted_idx[:num_pos]
+        if mode == "bottom":
+            neg_idx = sorted_idx[-num_neg:]
+        elif mode == "random":
+            neg_idx = np.random.choice(sorted_idx[num_pos:], num_neg, replace=False)
+        else:
+            raise NotImplementedError
+        idx = np.concatenate([pos_idx, neg_idx])
+        idx = unique_idx[idx]
+        selected_idx.append(idx)
+    selected_idx = torch.tensor(selected_idx).to(input_ids.device)
+    input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
+    attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
+    scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
+    return input_ids, attention_mask, scores

@@ -21,19 +21,18 @@ class RerankerTrainer(Trainer):
 
 
 def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
-    pred_scores, scores = eval_pred
-    agg_scores = np.sum(scores, axis=-1)
-    agg_pred_scores = np.sum(pred_scores, axis=-1)
+    pred_scores, scores = eval_pred # pred_scores [batch_size, num_candidates], scores [batch_size, num_candidates, n_tasks]
+    agg_scores = np.sum(scores, axis=-1) # aggregate scores
 
     sort_indices = np.flip(np.argsort(agg_scores, axis=-1), axis=-1) # (batch_size, n_candidate), expected ranks
     ranks = np.zeros_like(sort_indices)
     ranks[np.arange(sort_indices.shape[0])[:, None], sort_indices] = np.arange(sort_indices.shape[-1])
-    pred_sort_indices = np.flip(np.argsort(agg_pred_scores, axis=-1), axis=-1) # (batch_size, n_candidate), predicted ranks
+    pred_sort_indices = np.flip(np.argsort(pred_scores, axis=-1), axis=-1) # (batch_size, n_candidate), predicted ranks
     pred_ranks = np.zeros_like(pred_sort_indices)
     pred_ranks[np.arange(pred_sort_indices.shape[0])[:, None], pred_sort_indices] = np.arange(pred_sort_indices.shape[-1])
 
     # compute selection scores
-    sel_idx = np.argmax(agg_pred_scores, axis=1) # [batch_size]
+    sel_idx = np.argmax(pred_scores, axis=1) # [batch_size]
     sel_scores = scores[np.arange(scores.shape[0]), sel_idx] # [batch_size, n_task]
     sel_ranks = ranks[np.arange(ranks.shape[0]), sel_idx] # [batch_size]
     sel_acc = np.mean((sel_ranks == 0)) # scalar

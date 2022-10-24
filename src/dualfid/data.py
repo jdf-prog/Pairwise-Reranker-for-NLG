@@ -117,6 +117,48 @@ class SCRCollator(object):
             'scores' : torch.stack(batch_scores, dim=0),
         }
 
+class DualCollator(object):
+    def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
+        self.tokenizer = tokenizer
+        self.source_maxlength = source_maxlength
+        self.candidate_maxlength = candidate_maxlength
+
+        self.sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else tokenizer.eos_token
+        self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
+        assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
+        self.cls_token = self.cls_token if self.cls_token is not None else ""
+        self.separate_token = self.sep_token + ' ' + self.cls_token # used to separate 2 concatenated texts
+        self.target_maxlength = self.candidate_maxlength
+
+
+    def __call__(self, batch):
+        batch_size = len(batch)
+        batch_source = [b['source'] for b in batch]
+        batch_target = [b['target'] for b in batch]
+        batch_candidates = [b['candidates'] for b in batch]
+        batch_scores = [b['scores'] for b in batch]
+        batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
+        batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
+
+        source_encoding = self.tokenizer.batch_encode_plus(
+            batch_source,
+            max_length=self.source_maxlength,
+            padding='max_length',
+            return_tensors='pt',
+            truncation=True
+        )
+        encoded_source_ids = source_encoding['input_ids']
+        encoded_source_masks = source_encoding['attention_mask'].bool()
+        encoded_candidate_ids, encoded_candidate_masks = encode_batch_text(batch_candidates, self.tokenizer, self.candidate_maxlength)
+
+        return {
+            'source_ids' : encoded_source_ids,
+            'source_attention_mask' : encoded_source_masks,
+            "candidate_ids" : encoded_candidate_ids,
+            "candidate_attention_mask" : encoded_candidate_masks,
+            'scores' : torch.stack(batch_scores, dim=0),
+        }
+
 class DualFiDCollator(object):
     def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
         self.tokenizer = tokenizer
@@ -212,8 +254,6 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
                 "rougeL": candidate['scores']['rougeLsum'],
             }
 
-        item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] == "diverse_beam_search" and candidate['model'] == 'bart_cnndm'] # debug
-
     if n_tasks < 0:
         n_tasks = len(data[0]['candidates'][0]['scores'])
     for k, example in enumerate(data):
@@ -252,5 +292,7 @@ def get_data_collator_class(model_type:str):
         return DualFiDCollator
     elif model_type == "scr":
         return SCRCollator
+    elif model_type == "dual":
+        return DualCollator
     else:
         raise ValueError(f"model_type {model_type} not supported")

@@ -17,7 +17,7 @@ import os
 import pprint
 import warnings
 import logging
-from transformers import TrainingArguments, Trainer
+from transformers import TrainingArguments, Trainer, WEIGHTS_NAME, CONFIG_NAME
 from transformers.trainer_utils import PredictionOutput
 warnings.filterwarnings("ignore")
 from src.common.utils import (
@@ -66,7 +66,7 @@ def main(args):
         eval_examples = load_data(args.eval_data_path)
         eval_dataset = Dataset(eval_examples, args.n_candidate)
     if args.do_predict:
-        predict_examples = load_data(args.predict_data_path)
+        predict_examples = load_data(args.test_data_path)
         predict_dataset = Dataset(predict_examples, args.n_candidate)
 
     # set up data collator
@@ -77,15 +77,15 @@ def main(args):
     args.n_tasks = train_dataset.n_tasks
 
     # set up model
-    build_kargs = {
-        "n_tasks": args.n_tasks
+    config = {
+        "n_tasks": args.n_tasks,
+        "num_pos": args.num_pos,
+        "num_neg": args.num_neg,
+        "num_loss_type": args.num_loss_type,
     }
     model = build_reranker(args.reranker_type, args.model_type, args.model_name, args.cache_dir, **build_kargs)
-    if args.load_model_path:
-        model.load_state_dict(torch.load(args.load_model_path)) # load model if needed
-
-    #
-
+    if args.load_checkpoint:
+        model.load_state_dict(torch.load(args.load_checkpoint)) # load model if needed
 
     # set up trainer
     training_args = TrainingArguments(
@@ -138,12 +138,23 @@ def main(args):
 
     # set up wandb
     if args.report_to == "wandb":
-        wandb.init(project="Reranker", name=args.run_name)
+        wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
         wandb.config.update(args)
 
     if args.do_train:
         logging.info("Start training")
         outputs = trainer.train()
+        logging.info("Training finished")
+        global_step, training_loss = outputs.global_step, outputs.training_loss
+        metrics = outputs.metrics
+        logging.info(f"global_step = {global_step}, average loss = {training_loss}")
+        for key, value in metrics.items():
+            logging.info(f"{key} = {value}")
+
+        logging.info("Saving model")
+        best_checkpoint_folder = "checkpoint-best"
+        trainer.save_model(os.path.join(args.output_dir, best_checkpoint_folder))
+
 
     if args.do_predict:
         logging.info("Start predicting")
@@ -162,6 +173,8 @@ def main(args):
                 json.dump(predictions.tolist(), f)
             logging.info(f"predictions saved to {output_path}")
 
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -173,7 +186,7 @@ if __name__ == "__main__":
         "roberta", "bert", "t5"
     ], default="roberta")
     parser.add_argument("--model_name", type=str, default="roberta-base")
-    parser.add_argument("--load_model_path", type=str, default=None)
+    parser.add_argument("--load_checkpoint", type=str, default=None)
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
@@ -190,7 +203,7 @@ if __name__ == "__main__":
     # mode
     parser.add_argument("--do_train", type=str2bool, default=True)
     parser.add_argument("--do_eval", type=str2bool, default=True)
-    parser.add_argument("--do_predict", type=str2bool, default=False)
+    parser.add_argument("--do_predict", type=str2bool, default=True)
 
     # training hyperparameters
     parser.add_argument("--train_data_path", type=str, default=None)
@@ -214,12 +227,12 @@ if __name__ == "__main__":
 
 
     # predict config
-    parser.add_argument("--predict_data_path", type=str, default=None)
+    parser.add_argument("--test_data_path", type=str, default=None)
     parser.add_argument("--save_predictions", type=str2bool, default=True)
 
     # logging
     parser.add_argument("--logging_first_step", type=str2bool, default=True)
-    parser.add_argument("--logging_steps", type=int, default=100)
+    parser.add_argument("--logging_steps", type=int, default=5)
     parser.add_argument("--log_level", type=str, default="passive",
         choices=["passive", "info", "debug", "warning", "error", "critical"])
     parser.add_argument("--report_to", type=str, default="wandb")
@@ -257,3 +270,4 @@ if __name__ == "__main__":
 
 
 
+transformers.trainer.Trainer

@@ -7,23 +7,25 @@
 #SBATCH -n 1
 
 train_data_path="./data/prepared/cnndm/val/dataset_train.jsonl"
-dev_data_path="./data/prepared/cnndm/val/dataset_val.jsonl" # debug
+dev_data_path="./data/prepared/cnndm/val/dataset_val.jsonl"
 test_data_path="./data/prepared/cnndm/test/dataset.jsonl"
 
 nvidia-smi
 
-torchrun --standalone --nnodes 1 --nproc_per_node 1\
+torchrun --standalone --nnodes 1 --nproc_per_node 1 \
     train_reranker.py \
-    --reranker_type "scr" \
+    --reranker_type "dual" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "basic" \
+    --run_name "4_neg" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
-    --n_candidate 10 \
+    --test_data_path ${test_data_path} \
+    --n_candidate 30 \
     --source_maxlength 384 \
     --candidate_maxlength 128 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 8 \
-    --max_steps 25000 \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 5 \
     --overwrite_output_dir True \
