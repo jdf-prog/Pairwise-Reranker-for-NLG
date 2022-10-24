@@ -24,7 +24,7 @@ class RerankerTrainer(Trainer):
         if self.is_world_process_zero():
             super().save_model(output_dir)
             model = self.model.module if hasattr(self.model, "module") else self.model
-            torch.save(model.config, os.path.join(output_dir, "config.bin"))
+            torch.save(model.args, os.path.join(output_dir, "config.bin"))
 
 
 def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:

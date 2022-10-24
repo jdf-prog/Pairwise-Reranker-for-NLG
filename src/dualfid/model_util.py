@@ -86,10 +86,9 @@ def build_reranker_from_checkpoint(reranker_type, model_type, model_name, cache_
     config = torch.load(os.path.join(checkpoint, "config.bin"))
     reranker = build_reranker(reranker_type, model_type, model_name, cache_dir, config)
     reranker.load_state_dict(torch.load(os.path.join(checkpoint, "pytorch_model.bin")))
-    training_args = torch.load(os.path.join(checkpoint, "training_args.bin"))
     optimizer = torch.load(os.path.join(checkpoint, "optimizer.pt"))
     scheduler = torch.load(os.path.join(checkpoint, "scheduler.pt"))
-    return reranker, training_args, optimizer, scheduler, config
+    return reranker, optimizer, scheduler, config
 
 def save_reranker_checkpoint(trainer, reranker, save_path, checkpoint_name):
     checkpoint_dir = os.path.join(save_path, checkpoint_name)

@@ -52,7 +52,6 @@ def main(args):
     n_gpu = torch.cuda.device_count()
     logging.info(f"device: {device}, n_gpu: {n_gpu}")
 
-
     # set up tokenizer
     tokenizer = build_tokenizer(args.model_type, args.model_name, args.cache_dir)
 
@@ -73,27 +72,29 @@ def main(args):
     # set up data collator
     data_collator_class = get_data_collator_class(args.reranker_type)
     data_collator = data_collator_class(args.source_maxlength, tokenizer, args.candidate_maxlength)
-    if eval_dataset is not None:
-        assert train_dataset.n_tasks == eval_dataset.n_tasks
-    args.n_tasks = train_dataset.n_tasks
+
+    if args.do_train:
+        if args.do_eval:
+            assert train_dataset.n_tasks == eval_dataset.n_tasks
+        args.n_tasks = train_dataset.n_tasks
 
     # set up model
     if args.load_checkpoint:
-        model, training_args, optimizer, scheduler, config = build_reranker_from_checkpoint(
+        model, optimizer, scheduler, config = build_reranker_from_checkpoint(
             args.reranker_type,
             args.model_type,
             args.model_name,
             args.cache_dir,
-            args.load_checkpoint,
-            config
+            args.load_checkpoint
         )
     else:
+        assert args.do_train, "Must train a new model if not loading from checkpoint"
         optimizer, scheduler = None, None
         config = {
             "n_tasks": args.n_tasks,
             "num_pos": args.num_pos,
             "num_neg": args.num_neg,
-            "num_loss_type": args.num_loss_type,
+            "loss_type": args.loss_type,
         }
         model = build_reranker(
             args.reranker_type,
@@ -102,43 +103,44 @@ def main(args):
             args.cache_dir,
             config
         )
-        # set up trainer
-        training_args = TrainingArguments(
-            output_dir=args.output_dir,
-            overwrite_output_dir=args.overwrite_output_dir,
-            do_train=args.do_train,
-            do_eval=args.do_eval,
-            do_predict=args.do_predict,
-            per_device_train_batch_size=args.per_device_train_batch_size,
-            per_device_eval_batch_size=args.per_device_eval_batch_size,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay,
-            max_grad_norm=args.max_grad_norm,
-            num_train_epochs=args.num_train_epochs,
-            max_steps=args.max_steps,
-            eval_steps=args.eval_steps,
-            warmup_steps=args.warmup_steps,
-            warmup_ratio=args.warmup_ratio,
-            lr_scheduler_type=args.lr_scheduler_type,
-            logging_steps=args.logging_steps,
-            logging_first_step=args.logging_first_step,
-            log_level=args.log_level,
-            report_to=args.report_to,
-            run_name=args.run_name,
-            save_steps=args.save_steps,
-            load_best_model_at_end=args.load_best_model_at_end,
-            metric_for_best_model=args.metric_for_best_model,
-            seed=args.seed,
-            disable_tqdm=False,
-            greater_is_better=True,
-            local_rank=args.local_rank,
-            fp16=args.fp16,
-            deepspeed=args.deepspeed, #
-            sharded_ddp=args.sharded_ddp,
-            label_names=args.label_names,
-            evaluation_strategy=args.evaluation_strategy
-        )
+
+    # set up trainer
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        overwrite_output_dir=args.overwrite_output_dir,
+        do_train=args.do_train,
+        do_eval=args.do_eval,
+        do_predict=args.do_predict,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        per_device_eval_batch_size=args.per_device_eval_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        max_grad_norm=args.max_grad_norm,
+        num_train_epochs=args.num_train_epochs,
+        max_steps=args.max_steps,
+        eval_steps=args.eval_steps,
+        warmup_steps=args.warmup_steps,
+        warmup_ratio=args.warmup_ratio,
+        lr_scheduler_type=args.lr_scheduler_type,
+        logging_steps=args.logging_steps,
+        logging_first_step=args.logging_first_step,
+        log_level=args.log_level,
+        report_to=args.report_to,
+        run_name=args.run_name,
+        save_steps=args.save_steps,
+        load_best_model_at_end=args.load_best_model_at_end,
+        metric_for_best_model=args.metric_for_best_model,
+        seed=args.seed,
+        disable_tqdm=False,
+        greater_is_better=True,
+        local_rank=args.local_rank,
+        fp16=args.fp16,
+        deepspeed=args.deepspeed, #
+        sharded_ddp=args.sharded_ddp,
+        label_names=args.label_names,
+        evaluation_strategy=args.evaluation_strategy
+    )
     logging.info(f"training args: {training_args}")
 
     trainer = RerankerTrainer(
@@ -210,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", ""
-    ])
+    ], default="BCE")
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
@@ -285,15 +287,3 @@ if __name__ == "__main__":
     args.evaluation_strategy = "steps"
 
     main(args)
-
-
-
-
-
-
-
-
-
-
-
-transformers.trainer.Trainer

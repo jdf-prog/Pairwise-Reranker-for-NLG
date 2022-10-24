@@ -36,12 +36,12 @@ class SCR(nn.Module):
 
         See SummaReranker, Refsum, BRIO for details
     """
-    def __init__(self, pretrained_model, config):
+    def __init__(self, pretrained_model, args):
         super(SCR, self).__init__()
-        self.config = config
-        self.n_tasks = self.config.n_tasks
-        self.num_pos = self.config.num_pos
-        self.num_neg = self.config.num_neg
+        self.args = args
+        self.n_tasks = self.args["n_tasks"]
+        self.num_pos = self.args["num_pos"]
+        self.num_neg = self.args["num_neg"]
 
         # LM
         self.pretrained_model = pretrained_model
@@ -152,11 +152,11 @@ class DualReranker(nn.Module):
 
         See DPR for details
     """
-    def __init__(self, pretrained_model, config):
+    def __init__(self, pretrained_model, args):
         super(DualReranker, self).__init__()
-        self.config = config
-        self.num_pos = self.config.num_pos
-        self.num_neg = self.config.num_neg
+        self.args = args
+        self.num_pos = self.args["num_pos"]
+        self.num_neg = self.args["num_neg"]
 
         # LM
         self.source_encoder = pretrained_model
