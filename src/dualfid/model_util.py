@@ -71,7 +71,8 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, **kwargs):
     pretrained_model = build_pretrained_model(model_type, model_name, cache_dir)
 
     if reranker_type == "scr":
-        n_task = kwargs.get("n_task") # kwargs: n_tasks, when training
+        n_task = kwargs.get("n_tasks") # kwargs: n_tasks, when training
+
         if model_type.startswith("t5"):
             reranker = T5SCR(pretrained_model, n_task)
         else:

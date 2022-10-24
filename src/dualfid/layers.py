@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from dualfid.model_moe import MoE, MLPTower
+from dualfid.model_moe import MoE
 
 class ModelMultitaskRegression(nn.Module):
     """
@@ -63,7 +63,7 @@ class MoERegression(nn.Module):
         # MoE
         self.moe = MoE(n_tasks, hidden_size, hidden_size, num_experts, expert_hidden_size, k)
         # towers - one for each task
-        self.towers = nn.ModuleList([MLPTower(hidden_size) for _ in range(n_tasks)])
+        self.towers = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(n_tasks)])
         self.sigmoid = nn.Sigmoid()
 
 

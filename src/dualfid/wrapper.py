@@ -6,7 +6,6 @@ from torch import nn
 from transformers.modeling_outputs import BaseModelOutput
 import torch.nn.functional as F
 
-from dualfid.model_moe import MoE, MLPTower
 from dualfid.layers import (
     MoERegression,
     ModelMultitaskRegression

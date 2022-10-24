@@ -36,6 +36,7 @@ class SCR(nn.Module):
         See SummaReranker, Refsum, BRIO for details
     """
     def __init__(self, pretrained_model, n_tasks=3):
+        super(SCR, self).__init__()
         # LM
         self.pretrained_model = pretrained_model
         self.hidden_size = self.pretrained_model.config.hidden_size
@@ -45,18 +46,18 @@ class SCR(nn.Module):
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
         # MoE
-        self.moe = MoE(n_tasks, self.hidden_size, self.hidden_size)
+        self.moe = MoE(n_tasks, self.hidden_size, self.hidden_size, 2*n_tasks, self.hidden_size, k=n_tasks)
         # towers - one for each task
         self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(n_tasks)])
         self.sigmoid = nn.Sigmoid()
 
         self.loss = nn.BCEWithLogitsLoss()
 
-    def forward(self, input_ids, input_mask, scores):
+    def forward(self, input_ids, attention_mask, scores):
         """
         Args:
             input_ids: [batch_size, n_candidate, seq_len]
-            input_mask: [batch_size, n_candidate, seq_len]
+            attention_mask: [batch_size, n_candidate, seq_len]
             scores: [batch_size, n_candidate, n_task]
         """
 
@@ -65,30 +66,34 @@ class SCR(nn.Module):
         n_task = scores.shape[-1]
 
         to_model_input_ids = input_ids.view(-1, seq_len)
-        to_model_input_mask = input_mask.view(-1, seq_len)
+        to_model_attention_mask = attention_mask.view(-1, seq_len)
         outputs = self.pretrained_model(
             input_ids=to_model_input_ids,
-            attention_mask=to_model_input_mask,
+            attention_mask=to_model_attention_mask,
             output_hidden_states = True
         )
-        encs = outputs["last_hidden_state"][:, 0, :].reshape(batch_size, n_candidate, -1) # [batch_size, n_candidate, hidden_size]
+        encs = outputs["last_hidden_state"][:, 0, :] # [batch_size * n_candidate, hidden_size]
         # shared bottom
-        if self.args.use_shared_bottom:
-            encs = self.fc2(self.relu(self.fc1(encs)))
-        else:
-            encs = encs
+        encs = self.fc2(self.relu(self.fc1(encs)))
         # MoE
-        encs = self.moe(encs, train = self.training, collect_gates = not(self.training))
+        moe_preds, aux_loss = self.moe(encs, train = self.training, collect_gates = not(self.training))
         # go to towers for different tasks
-        preds_for_n_tasks = torch.cat([tower(encs) for tower in self.towers], dim=-1) # [batch_size, n_candidate, n_task]
-        preds_for_n_tasks = self.sigmoid(preds_for_n_tasks)
+        pred_scores_for_n_tasks = torch.cat([
+            tower(moe_pred) for moe_pred, tower in zip(moe_preds, self.towers)
+        ], dim=-1) # [batch_size * n_candidate, n_task]
         # compute loss
-        labelsfor_n_tasks = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(input_ids.device) # only the best one, [batch_size, n_candidate, n_task]
+        labels_for_n_tasks = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]) # only the best one, [batch_size, n_candidate, n_task]
+        labels_for_n_tasks = labels_for_n_tasks.view(-1, n_task).float().to(input_ids.device)
+        loss = self.loss(pred_scores_for_n_tasks, labels_for_n_tasks)
 
-        loss = F.binary_cross_entropy(preds_for_n_tasks, labelsfor_n_tasks, reduction='mean')
-
-        return loss, preds_for_n_tasks
-
+        # return loss and logits
+        pred_scores_for_n_tasks = \
+            self.sigmoid(pred_scores_for_n_tasks).reshape(batch_size, n_candidate, -1) # to output
+        outputs = {
+            "loss": loss + aux_loss,
+            "preds": pred_scores_for_n_tasks,
+        }
+        return outputs
 
 
 class T5SCR(nn.Module):

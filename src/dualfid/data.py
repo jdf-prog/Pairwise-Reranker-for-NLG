@@ -92,10 +92,7 @@ class SCRCollator(object):
         self.cls_token = self.cls_token if self.cls_token is not None else ""
         self.separate_token = self.sep_token + ' ' + self.cls_token # used to separate 2 concatenated texts
         self.postfix = postfix
-        self.max_length = self.source_maxlength + self.candidate_maxlength + 3 # 3 is for [CLS] and 2 [SEP] tokens
-        self.target_maxlength = self.candidate_maxlength + 2 # 2 is for [CLS] and [SEP] tokens
-        if self.postfix is not None:
-            self.max_length += len(self.tokenizer.tokenize(self.postfix))
+        self.target_maxlength = self.candidate_maxlength
 
 
     def __call__(self, batch):
@@ -112,23 +109,11 @@ class SCRCollator(object):
         else:
             texts = [[self.separate_token.join([s, c]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
 
-        encoded_text_ids, encoded_text_masks = encode_batch_text(texts, self.tokenizer, self.max_length)
-        target_encodings = self.tokenizer.batch_encode_plus(
-            batch_target,
-            max_length=self.target_maxlength,
-            padding='max_length',
-            return_tensors='pt',
-            truncation=True
-        )
-        encoded_target_ids = target_encodings['input_ids']
-        encoded_target_masks = target_encodings['attention_mask']
-
+        encoded_text_ids, encoded_text_masks = encode_batch_text(texts, self.tokenizer, self.tokenizer.model_max_length)
 
         return {
             'input_ids' : encoded_text_ids,
-            'input_masks' : encoded_text_masks,
-            'target_ids' : encoded_target_ids,
-            'target_masks' : encoded_target_masks,
+            'attention_mask' : encoded_text_masks,
             'scores' : torch.stack(batch_scores, dim=0),
         }
 
@@ -224,7 +209,7 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
             candidate['scores'] = {
                 "rouge1": candidate['scores']['rouge1'],
                 "rouge2": candidate['scores']['rouge2'],
-                "rougeL": candidate['scores']['rougeL'],
+                "rougeL": candidate['scores']['rougeLsum'],
             }
 
         item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] == "diverse_beam_search" and candidate['model'] == 'bart_cnndm'] # debug
@@ -260,7 +245,7 @@ def check_scores(examples):
         print(f"Candidate mean scores for task '{task}' are {candidate_scores[task]}")
 
 
-def get_data_collator(model_type:str):
+def get_data_collator_class(model_type:str):
     if model_type == "fid":
         return FiDCollator
     elif model_type == "dualfid":
