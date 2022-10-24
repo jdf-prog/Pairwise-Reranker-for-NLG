@@ -1,7 +1,9 @@
 import torch
+import os
 import numpy as np
 import torch.nn.functional as F
 from dualfid.data import Dataset
+from transformers import TrainingArguments, Trainer, WEIGHTS_NAME, CONFIG_NAME
 from dualfid.reranker import (
     SCR,
     T5SCR,
@@ -80,37 +82,22 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
         reranker = DualReranker(pretrained_model, config)
     return reranker
 
-def build_reranker_from_checkpoint(reranker_type, model_type, model_name, cache_dir, checkpoint, **kwargs):
-    reranker = build_reranker(reranker_type, model_type, model_name, cache_dir, **kwargs)
-    reranker.load_state_dict(torch.load(checkpoint))
-    return reranker
+def build_reranker_from_checkpoint(reranker_type, model_type, model_name, cache_dir, checkpoint):
+    config = torch.load(os.path.join(checkpoint, "config.bin"))
+    reranker = build_reranker(reranker_type, model_type, model_name, cache_dir, config)
+    reranker.load_state_dict(torch.load(os.path.join(checkpoint, "pytorch_model.bin")))
+    training_args = torch.load(os.path.join(checkpoint, "training_args.bin"))
+    optimizer = torch.load(os.path.join(checkpoint, "optimizer.pt"))
+    scheduler = torch.load(os.path.join(checkpoint, "scheduler.pt"))
+    return reranker, training_args, optimizer, scheduler, config
 
-def sub_sampling(input_ids, attention_mask, scores, num_pos, num_neg, mode="bottom"):
-    batch_size, n_candidate, seq_len = input_ids.shape
-    selected_idx = []
-    for i in range(batch_size):
-        idx = np.arange(n_candidate)
-        # remove duplicate candidates, cpu
-        unique_idx = []
-        unique_scores = []
-        for j, score in enumerate(torch.sum(scores[i], dim=-1)):
-            if score not in unique_scores:
-                unique_idx.append(idx[j])
-                unique_scores.append(score.item())
-        unique_idx = np.array(unique_idx)
-        unique_scores = np.array(unique_scores)
-        # only select a few pos and neg candidates
-        sorted_idx = np.argsort(unique_scores)[::-1]
-        pos_idx = sorted_idx[:num_pos]
-        if mode == "bottom":
-            neg_idx = sorted_idx[-num_neg:]
-        elif mode == "random":
-            neg_idx = np.random.choice(sorted_idx[num_pos:], num_neg, replace=False)
-        idx = np.concatenate([pos_idx, neg_idx])
-        idx = unique_idx[idx]
-        selected_idx.append(idx)
-    selected_idx = torch.tensor(selected_idx).to(input_ids.device)
-    input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-    attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-    scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-    return input_ids, attention_mask, scores
+def save_reranker_checkpoint(trainer, reranker, save_path, checkpoint_name):
+    checkpoint_dir = os.path.join(save_path, checkpoint_name)
+    # save training args and model parameters
+    trainer.save_model(checkpoint_dir)
+    # save optimizer and scheduler
+    torch.save(trainer.optimizer, os.path.join(checkpoint_dir, "optimizer.pt"))
+    torch.save(trainer.lr_scheduler, os.path.join(checkpoint_dir, "scheduler.pt"))
+    # save config
+    torch.save(reranker.config, os.path.join(checkpoint_dir, "config.bin"))
+

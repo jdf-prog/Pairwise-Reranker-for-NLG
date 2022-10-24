@@ -17,7 +17,7 @@ import os
 import pprint
 import warnings
 import logging
-from transformers import TrainingArguments, Trainer, WEIGHTS_NAME, CONFIG_NAME
+from transformers import TrainingArguments
 from transformers.trainer_utils import PredictionOutput
 warnings.filterwarnings("ignore")
 from src.common.utils import (
@@ -29,6 +29,7 @@ from src.dualfid.trainer import (
 from src.dualfid.model_util import (
     build_reranker,
     build_reranker_from_checkpoint,
+    save_reranker_checkpoint,
     build_tokenizer
 )
 from src.dualfid.data import (
@@ -77,53 +78,67 @@ def main(args):
     args.n_tasks = train_dataset.n_tasks
 
     # set up model
-    config = {
-        "n_tasks": args.n_tasks,
-        "num_pos": args.num_pos,
-        "num_neg": args.num_neg,
-        "num_loss_type": args.num_loss_type,
-    }
-    model = build_reranker(args.reranker_type, args.model_type, args.model_name, args.cache_dir, **build_kargs)
     if args.load_checkpoint:
-        model.load_state_dict(torch.load(args.load_checkpoint)) # load model if needed
-
-    # set up trainer
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        overwrite_output_dir=args.overwrite_output_dir,
-        do_train=args.do_train,
-        do_eval=args.do_eval,
-        do_predict=args.do_predict,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        per_device_eval_batch_size=args.per_device_eval_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        max_grad_norm=args.max_grad_norm,
-        num_train_epochs=args.num_train_epochs,
-        max_steps=args.max_steps,
-        eval_steps=args.eval_steps,
-        warmup_steps=args.warmup_steps,
-        warmup_ratio=args.warmup_ratio,
-        lr_scheduler_type=args.lr_scheduler_type,
-        logging_steps=args.logging_steps,
-        logging_first_step=args.logging_first_step,
-        log_level=args.log_level,
-        report_to=args.report_to,
-        run_name=args.run_name,
-        save_steps=args.save_steps,
-        load_best_model_at_end=args.load_best_model_at_end,
-        metric_for_best_model=args.metric_for_best_model,
-        seed=args.seed,
-        disable_tqdm=False,
-        greater_is_better=True,
-        local_rank=args.local_rank,
-        fp16=args.fp16,
-        deepspeed=args.deepspeed, #
-        sharded_ddp=args.sharded_ddp,
-        label_names=args.label_names,
-        evaluation_strategy=args.evaluation_strategy
-    )
+        model, training_args, optimizer, scheduler, config = build_reranker_from_checkpoint(
+            args.reranker_type,
+            args.model_type,
+            args.model_name,
+            args.cache_dir,
+            args.load_checkpoint,
+            config
+        )
+    else:
+        optimizer, scheduler = None, None
+        config = {
+            "n_tasks": args.n_tasks,
+            "num_pos": args.num_pos,
+            "num_neg": args.num_neg,
+            "num_loss_type": args.num_loss_type,
+        }
+        model = build_reranker(
+            args.reranker_type,
+            args.model_type,
+            args.model_name,
+            args.cache_dir,
+            config
+        )
+        # set up trainer
+        training_args = TrainingArguments(
+            output_dir=args.output_dir,
+            overwrite_output_dir=args.overwrite_output_dir,
+            do_train=args.do_train,
+            do_eval=args.do_eval,
+            do_predict=args.do_predict,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            per_device_eval_batch_size=args.per_device_eval_batch_size,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            max_grad_norm=args.max_grad_norm,
+            num_train_epochs=args.num_train_epochs,
+            max_steps=args.max_steps,
+            eval_steps=args.eval_steps,
+            warmup_steps=args.warmup_steps,
+            warmup_ratio=args.warmup_ratio,
+            lr_scheduler_type=args.lr_scheduler_type,
+            logging_steps=args.logging_steps,
+            logging_first_step=args.logging_first_step,
+            log_level=args.log_level,
+            report_to=args.report_to,
+            run_name=args.run_name,
+            save_steps=args.save_steps,
+            load_best_model_at_end=args.load_best_model_at_end,
+            metric_for_best_model=args.metric_for_best_model,
+            seed=args.seed,
+            disable_tqdm=False,
+            greater_is_better=True,
+            local_rank=args.local_rank,
+            fp16=args.fp16,
+            deepspeed=args.deepspeed, #
+            sharded_ddp=args.sharded_ddp,
+            label_names=args.label_names,
+            evaluation_strategy=args.evaluation_strategy
+        )
     logging.info(f"training args: {training_args}")
 
     trainer = RerankerTrainer(
@@ -134,6 +149,7 @@ def main(args):
         data_collator=data_collator,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
+        optimizers=(optimizer, scheduler),
     )
 
     # set up wandb
@@ -153,8 +169,12 @@ def main(args):
 
         logging.info("Saving model")
         best_checkpoint_folder = "checkpoint-best"
-        trainer.save_model(os.path.join(args.output_dir, best_checkpoint_folder))
-
+        save_reranker_checkpoint(
+            trainer,
+            model,
+            args.output_dir,
+            best_checkpoint_folder
+        )
 
     if args.do_predict:
         logging.info("Start predicting")
@@ -187,11 +207,17 @@ if __name__ == "__main__":
     ], default="roberta")
     parser.add_argument("--model_name", type=str, default="roberta-base")
     parser.add_argument("--load_checkpoint", type=str, default=None)
+    parser.add_argument("--cache_dir", type=str, default=None)
+    parser.add_argument("--loss_type", type=str, choices=[
+      "BCE", "infoNCE", "ListNet", "ListMLE", ""
+    ])
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
     parser.add_argument("--source_maxlength", type=int, default=128)
     parser.add_argument("--candidate_maxlength", type=int, default=512)
+    parser.add_argument("--num_pos", type=int, default=1)
+    parser.add_argument("--num_neg", type=int, default=1)
 
     # running config
     parser.add_argument("--seed", type=int, default=42)

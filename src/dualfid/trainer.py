@@ -2,6 +2,7 @@ import torch
 import wandb
 import torch.nn as nn
 import numpy as np
+import os
 from transformers import Trainer, TrainingArguments, default_data_collator
 from transformers import EvalPrediction
 from typing import Dict, List, Optional, Tuple, Union, Any
@@ -18,6 +19,12 @@ class RerankerTrainer(Trainer):
         if self.is_world_process_zero():
             wandb.log(metrics)
         return metrics
+
+    def save_model(self, output_dir: Optional[str] = None):
+        if self.is_world_process_zero():
+            super().save_model(output_dir)
+            model = self.model.module if hasattr(self.model, "module") else self.model
+            torch.save(model.config, os.path.join(output_dir, "config.bin"))
 
 
 def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
