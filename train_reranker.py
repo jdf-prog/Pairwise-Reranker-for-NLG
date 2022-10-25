@@ -60,13 +60,13 @@ def main(args):
     eval_dataset = None
     predict_dataset = None
     if args.do_train:
-        train_examples = load_data(args.train_data_path)
+        train_examples = load_data(args.train_data_path, args)
         train_dataset = Dataset(train_examples, args.n_candidate)
     if args.do_eval:
-        eval_examples = load_data(args.eval_data_path)
+        eval_examples = load_data(args.eval_data_path, args)
         eval_dataset = Dataset(eval_examples, args.n_candidate)
     if args.do_predict:
-        predict_examples = load_data(args.test_data_path)
+        predict_examples = load_data(args.test_data_path, args)
         predict_dataset = Dataset(predict_examples, args.n_candidate)
 
     # set up data collator
@@ -95,6 +95,7 @@ def main(args):
             "num_pos": args.num_pos,
             "num_neg": args.num_neg,
             "loss_type": args.loss_type,
+            "top_k_permutation": args.top_k_permutation,
         }
         model = build_reranker(
             args.reranker_type,
@@ -119,7 +120,6 @@ def main(args):
         max_grad_norm=args.max_grad_norm,
         num_train_epochs=args.num_train_epochs,
         max_steps=args.max_steps,
-        eval_steps=args.eval_steps,
         warmup_steps=args.warmup_steps,
         warmup_ratio=args.warmup_ratio,
         lr_scheduler_type=args.lr_scheduler_type,
@@ -128,7 +128,6 @@ def main(args):
         log_level=args.log_level,
         report_to=args.report_to,
         run_name=args.run_name,
-        save_steps=args.save_steps,
         load_best_model_at_end=args.load_best_model_at_end,
         metric_for_best_model=args.metric_for_best_model,
         seed=args.seed,
@@ -139,9 +138,11 @@ def main(args):
         deepspeed=args.deepspeed, #
         sharded_ddp=args.sharded_ddp,
         label_names=args.label_names,
-        evaluation_strategy=args.evaluation_strategy
+        evaluation_strategy=args.evaluation_strategy,
+        save_strategy=args.save_strategy,
     )
     logging.info(f"training args: {training_args}")
+    logging.info(f"model config: {config}")
 
     trainer = RerankerTrainer(
         model=model,
@@ -154,12 +155,13 @@ def main(args):
         optimizers=(optimizer, scheduler),
     )
 
-    # set up wandb
-    if args.report_to == "wandb":
-        wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
-        wandb.config.update(args)
+
 
     if args.do_train:
+        # set up wandb
+        if args.report_to == "wandb":
+            wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
+            wandb.config.update(args)
         logging.info("Start training")
         outputs = trainer.train()
         logging.info("Training finished")
@@ -213,13 +215,20 @@ if __name__ == "__main__":
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", ""
     ], default="BCE")
+    parser.add_argument("--top_k_permutation", type=int, default=1)
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
+    parser.add_argument("--generation_method", type=str, choices=[
+        "diverse_beam_search", "beam_search", "top_k_sampling", "top_p_sampling"
+    ], default=None)
+    parser.add_argument("--candidate_model", type=str, choices=[
+        "bart_cnndm", "bart_xum", "pegasus_cnndm", "pegasus_xsum"
+    ], default=None)
     parser.add_argument("--source_maxlength", type=int, default=128)
     parser.add_argument("--candidate_maxlength", type=int, default=512)
-    parser.add_argument("--num_pos", type=int, default=1)
-    parser.add_argument("--num_neg", type=int, default=1)
+    parser.add_argument("--num_pos", type=int, default=0)
+    parser.add_argument("--num_neg", type=int, default=0)
 
     # running config
     parser.add_argument("--seed", type=int, default=42)
@@ -243,7 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=3)
     parser.add_argument("--max_steps", type=int, default=-1)
     parser.add_argument("--warmup_ratio", type=float, default=0.0)
-    parser.add_argument("--warmup_steps", type=int, default=1000) # Overrides any effect of :obj:`warmup_ratio`.
+    parser.add_argument("--warmup_steps", type=int, default=0) # Overrides any effect of :obj:`warmup_ratio`.
     parser.add_argument("--lr_scheduler_type", type=str, choices=[
         "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
     ], default="linear")
@@ -251,7 +260,6 @@ if __name__ == "__main__":
     # evaluation hyperparameters
     parser.add_argument("--eval_data_path", type=str, default=None)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=8)
-    parser.add_argument("--eval_steps", type=int, default=500)
 
 
     # predict config
@@ -267,7 +275,6 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", type=str, default="basic") # wandb run name
 
     # save config
-    parser.add_argument("--save_steps", type=int, default=1000)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--overwrite_output_dir", type=str2bool, default=False)
 
@@ -284,6 +291,8 @@ if __name__ == "__main__":
 
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
     args.label_names = ["scores"]
-    args.evaluation_strategy = "steps"
+    args.evaluation_strategy = "epoch"
+    args.save_strategy = "epoch"
+    args.run_name = args.run_name + f"_{args.loss_type}"
 
     main(args)

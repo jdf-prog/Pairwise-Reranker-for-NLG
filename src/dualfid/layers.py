@@ -87,3 +87,92 @@ class MoERegression(nn.Module):
             total_aux_loss += aux_loss
         pred_scores = torch.stack(pred_scores, dim=1)
         return pred_scores, total_aux_loss
+
+def permutation_prob(scores, level=1):
+    """
+    Args:
+        scores: [batch_size, n_candidate]
+        level: level of the permutation probs to compute
+            when level is 1, we compute the top-1 permutation probs
+    Returns:
+        prob: [batch_size, (n_candidate-1)*(n_candidate-2)*...(n_candidate-level)]
+    """
+    probs = []
+    batch_size, n_candidate = scores.size()
+    cur_probs = scores / scores.sum(dim=1, keepdim=True)
+    if level > 1:
+        for i in range(len(n_candidate)):
+            cur_prob = cur_probs[:, i] # [batch_size]
+            scores_except_i = torch.cat([scores[:-1, :i], scores[:-1, i+1:]], dim=1)
+            next_prob = permutation_prob(scores_except_i, level=level-1) # [batch_size, (n_candidate-1)*(n_candidate-2)*...(n_candidate-level)]
+            probs.append(cur_prob * next_prob)
+        probs = torch.cat(probs, dim=1)
+        return probs
+    else:
+        return cur_probs
+
+
+
+def ListNet_loss(pred_scores, scores, top_k_permutation=1):
+    """
+    Args:
+        pred_scores: [batch_size, n_candidate]
+        scores: [batch_size, n_candidate]
+        top_k_permutation: int, top k permutation to compute the loss
+    Return:
+        loss: [1]
+        preds: [batch_size, n_candidate]
+    """
+    # apply exp
+    exp_pred_scores = torch.exp(pred_scores - torch.max(pred_scores, dim=1, keepdim=True)[0]) # [batch_size, n_candidate]
+    exp_sum_scores = torch.exp(scores - torch.max(scores, dim=1, keepdim=True)[0]) # [batch_size, n_candidate]
+    # compute prob
+    logits = permutation_prob(exp_pred_scores, top_k_permutation)
+    labels = permutation_prob(exp_sum_scores, top_k_permutation)
+    # compute cross entropy loss
+    loss = F.cross_entropy(logits, labels)
+    return loss, pred_scores
+
+def ListMLE_loss(pred_scores, scores):
+    """
+    Args:
+        pred_scores: [batch_size, n_candidate]
+        scores: [batch_size, n_candidate]
+    Return:
+        loss: [1]
+    """
+    batch_size, n_candidate = pred_scores.shape
+    # apply exp
+    exp_pred_scores = torch.exp(pred_scores - torch.max(pred_scores, dim=1, keepdim=True)[0]) # [batch_size, n_candidate]
+    exp_sum_scores = torch.exp(scores - torch.max(scores, dim=1, keepdim=True)[0]) # [batch_size, n_candidate]
+
+    sorted_indices = torch.argsort(exp_sum_scores, dim=1, descending=True) # [batch_size, n_candidate]
+    probs = []
+    for i in range(n_candidate):
+        order_i_indices = sorted_indices[:, i] # [batch_size]
+        left_indices = sorted_indices[:,i:] # [batch_size, n_candidate - i]
+        denom_prob = -torch.log(exp_pred_scores[torch.arange(batch_size), order_i_indices])
+        numer_prob = torch.log(torch.sum(exp_pred_scores[torch.arange(batch_size).unsqueeze(1), left_indices], dim=1))
+        probs.append(denom_prob + numer_prob) # [batch_size]
+    loss = torch.sum(torch.stack(probs, dim=1), dim=1) # [batch_size]
+    loss = torch.mean(loss)
+    return loss
+
+def infoNCE_loss(sim_mat, labels, temperature=0.07):
+    """
+        InfoNCE loss
+        See paper: https://arxiv.org/abs/2002.05709
+    Args:
+        sim_mat: [batch_size, n_candidate]
+        labels: [batch_size, n_candidate]
+        temperature: float
+    Return:
+        loss: [1]
+    """
+    # compute info loss
+    pos_sim = torch.sum(sim_mat * labels, dim=-1)
+    pos_sim = torch.exp(pos_sim / temperature)
+    neg_sim = torch.sum(sim_mat * (1 - labels), dim=-1)
+    neg_sim = torch.exp(neg_sim / temperature)
+    loss = -torch.log(pos_sim / (pos_sim + neg_sim)).mean()
+    return loss

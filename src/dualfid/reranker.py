@@ -9,6 +9,9 @@ import torch.nn.functional as F
 import os
 from dualfid.layers import (
     MoE,
+    infoNCE_loss,
+    ListNet_loss,
+    ListMLE_loss,
 )
 from copy import deepcopy
 import transformers.trainer
@@ -20,7 +23,6 @@ from torch.nn import (
 from transformers.modeling_outputs import (
     SequenceClassifierOutput
 )
-
 class SCR(nn.Module):
     """
         Roberta Sequence Classification Reranker
@@ -31,8 +33,8 @@ class SCR(nn.Module):
             Using [CLS] token as the representation of the whole sequence.
 
         Support 3 objectives of reranking:
-            1. multi-task regression (MSE loss)
             2. multi-task classification (BCE loss)
+
 
         See SummaReranker, Refsum, BRIO for details
     """
@@ -42,49 +44,57 @@ class SCR(nn.Module):
         self.n_tasks = self.args["n_tasks"]
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
+        self.loss_type = self.args["loss_type"]
+        self.top_k_permutation = self.args.get("top_k_permutation", 1)
+        self.drop_out = self.args.get("drop_out", 0.05)
 
         # LM
         self.pretrained_model = pretrained_model
         self.hidden_size = self.pretrained_model.config.hidden_size
-        self.bottom_hidden_size = self.hidden_size * 2
-        # shared bottom
-        self.fc1 = nn.Linear(self.hidden_size, self.bottom_hidden_size)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
-        # MoE
-        self.moe = MoE(self.n_tasks, self.hidden_size, self.hidden_size, 2*self.n_tasks, self.hidden_size, k=self.n_tasks)
-        # towers - one for each task
-        self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
-        self.sigmoid = nn.Sigmoid()
 
-        self.loss = nn.BCEWithLogitsLoss()
+        if self.loss_type == "BCE":
+            self.bottom_hidden_size = self.hidden_size * 2
+            # shared bottom
+            self.fc1 = nn.Linear(self.hidden_size, self.bottom_hidden_size)
+            self.relu = nn.ReLU()
+            self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
+            # MoE
+            self.moe = MoE(self.n_tasks, self.hidden_size, self.hidden_size, 2*self.n_tasks, self.hidden_size, k=self.n_tasks)
+            # towers - one for each task
+            self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
+            self.sigmoid = nn.Sigmoid()
 
-    def forward(self, input_ids, attention_mask, scores):
+            self.loss = nn.BCEWithLogitsLoss()
+        elif self.loss_type == "ListMLE":
+            self.regression_layer = nn.Sequential(
+                nn.Dropout(self.drop_out),
+                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.Tanh(),
+                nn.Dropout(self.drop_out),
+                nn.Linear(self.hidden_size, 1),
+            )
+        elif self.loss_type == "ListNet":
+            self.regression_layer = nn.Sequential(
+                nn.Dropout(self.drop_out),
+                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.Tanh(),
+                nn.Dropout(self.drop_out),
+                nn.Linear(self.hidden_size, 1),
+            )
+            self.loss = nn.CrossEntropyLoss()
+
+
+    def BCE_loss(self, encs, scores):
         """
+            SummareReranker
         Args:
-            input_ids: [batch_size, n_candidate, seq_len]
-            attention_mask: [batch_size, n_candidate, seq_len]
+            encs: [batch_size * n_candidate, hidden_size]
             scores: [batch_size, n_candidate, n_task]
+        Return:
+            loss: [1]
+            preds: [batch_size, n_candidate]
         """
-        # sub sampling candidates
-        if self.training:
-            input_ids, attention_mask, scores = \
-                sub_sampling(input_ids, attention_mask, scores, self.num_pos, self.num_neg)
-
-        loss = torch.tensor(0.0).to(input_ids.device)
-
-
-        batch_size, n_candidate, seq_len = input_ids.shape
-        n_task = scores.shape[-1]
-
-        to_model_input_ids = input_ids.view(-1, seq_len)
-        to_model_attention_mask = attention_mask.view(-1, seq_len)
-        outputs = self.pretrained_model(
-            input_ids=to_model_input_ids,
-            attention_mask=to_model_attention_mask,
-            output_hidden_states = True
-        )
-        encs = outputs["last_hidden_state"][:, 0, :] # [batch_size * n_candidate, hidden_size]
+        batch_size, n_candidate, n_task = scores.shape
         # shared bottom
         encs = self.fc2(self.relu(self.fc1(encs)))
         # MoE
@@ -95,16 +105,55 @@ class SCR(nn.Module):
         ], dim=-1) # [batch_size * n_candidate, n_task]
         # compute loss
         labels_for_n_tasks = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]) # only the best one, [batch_size, n_candidate, n_task]
-        labels_for_n_tasks = labels_for_n_tasks.view(-1, n_task).float().to(input_ids.device)
+        labels_for_n_tasks = labels_for_n_tasks.view(-1, n_task).float().to(encs.device)
         loss = self.loss(pred_scores_for_n_tasks, labels_for_n_tasks)
+        loss += aux_loss
 
         # return loss and logits
         pred_scores_for_n_tasks = torch.sum(
             self.sigmoid(pred_scores_for_n_tasks).reshape(batch_size, n_candidate, -1)
         , dim=-1) # to output, [batch_size, n_candidate]
+        return loss, pred_scores_for_n_tasks
+
+    def forward(self, input_ids, attention_mask, scores):
+        """
+        Args:
+            input_ids: [batch_size, n_candidate, seq_len]
+            attention_mask: [batch_size, n_candidate, seq_len]
+            scores: [batch_size, n_candidate, n_task]
+        """
+        if self.training:
+            # sub sampling candidates if needed
+            if self.num_pos > 0 and self.num_neg > 0:
+                input_ids, attention_mask, scores = \
+                    sub_sampling(input_ids, attention_mask, scores, self.num_pos, self.num_neg)
+        loss = torch.tensor(0.0).to(input_ids.device)
+
+        batch_size, n_candidate, seq_len = input_ids.shape
+
+        to_model_input_ids = input_ids.view(-1, seq_len)
+        to_model_attention_mask = attention_mask.view(-1, seq_len)
+        outputs = self.pretrained_model(
+            input_ids=to_model_input_ids,
+            attention_mask=to_model_attention_mask,
+            output_hidden_states = True
+        )
+        encs = outputs["last_hidden_state"][:, 0, :] # [batch_size * n_candidate, hidden_size]
+
+        if self.loss_type == "BCE":
+            loss, pred_scores = self.BCE_loss(encs, scores)
+        elif self.loss_type == "ListMLE":
+            sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
+            pred_scores = self.regression_layer(encs).reshape(batch_size, n_candidate) # [batch_size, n_candidate]
+            loss = ListMLE_loss(pred_scores, sum_scores)
+        elif self.loss_type == "ListNet":
+            sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
+            pred_scores = self.regression_layer(encs).reshape(batch_size, n_candidate) # [batch_size, n_candidate]
+            loss = ListNet_loss(pred_scores, sum_scores, self.top_k_permutation)
+
         outputs = {
-            "loss": loss + aux_loss,
-            "preds": pred_scores_for_n_tasks,
+            "loss": loss,
+            "preds": pred_scores,
         }
         return outputs
 
@@ -157,38 +206,14 @@ class DualReranker(nn.Module):
         self.args = args
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
+        self.loss_type = self.args["loss_type"]
+        self.top_k_permutation = self.args["top_k_permutation"]
 
         # LM
         self.source_encoder = pretrained_model
         self.candidate_encoder = deepcopy(pretrained_model)
         self.hidden_size = self.source_encoder.config.hidden_size
-        self.sigmoid = nn.Sigmoid()
 
-    def infoNCE_loss(self, source_enc, candidate_enc, labels, temperature=0.07):
-        """
-            InfoNCE loss
-            See paper: https://arxiv.org/abs/2002.05709
-        Args:
-            source_enc: [batch_size, hidden_size]
-            candidate_enc: [batch_size, n_candidate, hidden_size]
-            labels: [batch_size, n_candidate]
-        """
-        batch_size, n_candidate, hidden_size = candidate_enc.shape
-        # normalize
-        source_enc = F.normalize(source_enc, dim=-1).reshape(batch_size, 1, hidden_size)
-        candidate_enc = F.normalize(candidate_enc, dim=-1)
-        # compute similarity matrix
-        sim_mat = torch.matmul(source_enc, candidate_enc.transpose(1, 2)).squeeze(1) # [batch_size, n_candidate]
-        # compute info loss
-        pos_sim = torch.sum(sim_mat * labels, dim=-1)
-        pos_sim = torch.exp(pos_sim / temperature)
-        neg_sim = torch.sum(sim_mat * (1 - labels), dim=-1)
-        neg_sim = torch.exp(neg_sim / temperature)
-        loss = -torch.log(pos_sim / (pos_sim + neg_sim)).mean()
-        return loss, sim_mat
-
-    def ListMLE_loss(self, source_enc, candidate_enc, labels):
-        pass
 
     def forward(self, source_ids, source_attention_mask, candidate_ids, candidate_attention_mask, scores):
         """
@@ -200,8 +225,9 @@ class DualReranker(nn.Module):
             scores: [batch_size, n_candidate, n_task]
         """
         if self.training:
-            candidate_ids, candidate_attention_mask, scores = \
-                sub_sampling(candidate_ids, candidate_attention_mask, scores, self.num_pos, self.num_neg)
+            if self.num_pos > 0 and self.num_neg > 0:
+                candidate_ids, candidate_attention_mask, scores = \
+                    sub_sampling(candidate_ids, candidate_attention_mask, scores, self.num_pos, self.num_neg)
 
         loss = torch.tensor(0.0).to(source_ids.device)
         batch_size, n_candidate, candidate_seq_len = candidate_ids.shape
@@ -217,18 +243,31 @@ class DualReranker(nn.Module):
             input_ids=source_ids,
             attention_mask=source_attention_mask,
             output_hidden_states = True
-        )["last_hidden_state"][:, 0, :] # [batch_size, hidden_size]
+        )["last_hidden_state"][:, 0, :].reshape(batch_size, 1, -1) # [batch_size, 1, hidden_size]
         candidate_encs = self.candidate_encoder(
             input_ids=candidate_ids,
             attention_mask=candidate_attention_mask,
             output_hidden_states = True
         )["last_hidden_state"][:, 0, :].reshape(batch_size, n_candidate, -1) # [batch_size, n_candidate, hidden_size]
 
-        # compute preds revalence using dot product
+
+        # compute similarity matrix
+        source_encs = F.normalize(source_encs, dim=-1)
+        candidate_encs = F.normalize(candidate_encs, dim=-1)
+        sim_mat = torch.matmul(source_encs, candidate_encs.transpose(1, 2)).squeeze(1) # [batch_size, n_candidate]
         sum_scores = torch.sum(scores, dim=-1).to(source_ids.device) # [batch_size, n_candidate]
         labels = torch.eq(sum_scores, torch.max(sum_scores, dim=1, keepdim=True)[0]).float() # only the best one, [batch_size, n_candidate]
-        # comput infoNCE loss
-        loss, sim_mat = self.infoNCE_loss(source_encs, candidate_encs, labels)
+
+        if self.loss_type == "BCE":
+            loss = F.binary_cross_entropy_with_logits(sim_mat, labels)
+        elif self.loss_type == "infoNCE":
+            loss = infoNCE_loss(sim_mat, labels)
+        elif self.loss_type == "ListMLE":
+            loss = ListMLE_loss(sim_mat, sum_scores)
+        elif self.loss_type == "ListNet":
+            loss = ListNet_loss(sim_mat, sum_scores, self.top_k_permutation)
+        else:
+            raise ValueError("Loss type not supported")
 
         outputs = {
             "loss": loss,

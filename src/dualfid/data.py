@@ -234,7 +234,7 @@ class FiDCollator(object):
 
         return (index, target_ids, target_mask, context_ids, context_masks, scores)
 
-def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
+def load_data(data_path, args):
     assert data_path, "data_path is not specified"
     print("Loading data from {}".format(data_path))
     if data_path.endswith('.jsonl'):
@@ -245,26 +245,25 @@ def load_data(data_path=None, global_rank=-1, world_size=-1, n_tasks=-1):
             data = json.load(fin)
     examples = []
 
-    # debug, sort the keys in the right order
     for item in data:
+        # debug, sort the keys in the right order
         for candidate in item['candidates']:
             candidate['scores'] = {
                 "rouge1": candidate['scores']['rouge1'],
                 "rouge2": candidate['scores']['rouge2'],
                 "rougeL": candidate['scores']['rougeLsum'],
             }
+        if args.candidate_model is not None:
+            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['model'] == args.candidate_model]
+        if args.generation_method is not None:
+            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] == args.generation_method]
 
-    if n_tasks < 0:
-        n_tasks = len(data[0]['candidates'][0]['scores'])
     for k, example in enumerate(data):
-        if global_rank > -1 and not k%world_size==global_rank:
-            continue
         if not 'id' in example:
             example['id'] = k
         examples.append(example)
         for candidate in example['candidates']:
-            candidate['scores'] = {k:float(v) for k,v in list(candidate['scores'].items())[:n_tasks]}
-            assert len(candidate['scores']) == n_tasks, f"{len(candidate['scores'])} != {n_tasks}"
+            candidate['scores'] = {k:float(v) for k,v in list(candidate['scores'].items())}
     check_scores(examples)
     return examples
 
