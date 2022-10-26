@@ -138,13 +138,16 @@ def set_optim(opt, model):
         source_encoder_param = [p for p in source_encoder.parameters() if p not in shared_layer_param_set]
         candidate_encoder_param = [p for p in candidate_encoder.parameters() if p not in shared_layer_param_set]
         decoder_param = [p for p in decoder.parameters() if p not in shared_layer_param_set]
+        # decoder_param = [p for p in decoder.parameters()] # debug
         optim_params = [
             {"params": source_encoder_param, "lr": opt.source_encoder_lr},
             {"params": candidate_encoder_param, "lr": opt.candidate_encoder_lr},
             {"params": decoder_param, "lr": opt.decoder_lr},
         ]
     else:
-        optim_params = model.parameters()
+        optim_params =[
+            {"params": model.parameters(), "lr": opt.lr},
+        ]
 
     if opt.optim == 'adam':
         optimizer = torch.optim.Adam(optim_params)

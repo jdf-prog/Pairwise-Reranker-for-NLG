@@ -5,3 +5,8 @@ nltk
 rouge_score
 torchmetrics
 wandb
+scipy
+sentencepiece
+pytorch-metric-learning
+prettytable
+fairscale

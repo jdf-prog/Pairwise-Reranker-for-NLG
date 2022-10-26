@@ -9,31 +9,20 @@
 train_data_path="./data/cnn_dailymail_train_hypo.jsonl"
 dev_data_path="./data/cnn_dailymail_val_hypo.jsonl"
 test_data_path="./data/cnn_dailymail_test_hypo.jsonl"
-model_type='dualt5'
-model_size="base"
-name="sel_gen_BCE"
+model_type='bart'
+model_size="large"
+name="pure_bart-large"
 
 checkpoint_dir="checkpoint/${model_type}-${model_size}"
 model_path="${checkpoint_dir}/${name}/checkpoint/best_dev"
-if [ ${model_type} == 't5' ]; then
-        text_maxlength=512
-elif [ ${model_type} == 'bart' ]; then
-        text_maxlength=1024
-elif [ ${model_type} == 'dualt5' ]; then
-        text_maxlength=512
-elif [ ${model_type} == 'dualbart' ]; then
-        text_maxlength=1024
-
-else
-        echo "model type not supported"
-        exit 1
-fi
-
+source_maxlength=512
+candidate_maxlength=200
 
 echo "model type: ${model_type}"
 echo "model size: ${model_size}"
 echo "name: ${name}"
-echo "text_maxlength: ${text_maxlength}"
+echo "source_maxlength: ${source_maxlength}"
+echo "candidate_maxlength: ${candidate_maxlength}"
 
 nvidia-smi
 python test_model.py \
@@ -43,8 +32,8 @@ python test_model.py \
         --checkpoint_dir ${checkpoint_dir} \
         --model_path ${model_path} \
         --eval_data ${test_data_path} \
-        --source_maxlength ${text_maxlength} \
-        --candidate_maxlength ${text_maxlength} \
+        --source_maxlength ${source_maxlength} \
+        --candidate_maxlength ${candidate_maxlength} \
         --per_gpu_batch_size 2 \
         --n_candidate 6 \
         --main_port 19001 \

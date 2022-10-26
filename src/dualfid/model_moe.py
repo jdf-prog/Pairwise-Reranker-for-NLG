@@ -167,7 +167,7 @@ class MoE(nn.Module):
         encourages all experts to be approximately equally used across a batch.
         """
         all_y = []
-        all_loss = torch.tensor(0.0).cuda()
+        all_loss = torch.tensor(0.0).to(x.device)
         for gate_idx in range(self.n_tasks):
             gates, load = self.noisy_top_k_gating(gate_idx, x, train)
             # calculate importance loss
@@ -204,16 +204,6 @@ class MLPExpert(nn.Module):
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
-        return out
-
-
-class MLPTower(nn.Module):
-    def __init__(self, input_size):
-        super(MLPTower, self).__init__()
-        self.fc = nn.Linear(input_size, 1)
-
-    def forward(self, x):
-        out = self.fc(x)
         return out
 
 
