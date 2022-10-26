@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from sre_parse import State
 import time
 import os
 import sys
@@ -22,14 +23,13 @@ from transformers.trainer_utils import PredictionOutput
 warnings.filterwarnings("ignore")
 from src.common.utils import (
     str2bool,
+    seed_everything
 )
 from src.dualfid.trainer import (
     compute_metrics,
 )
 from src.dualfid.model_util import (
     build_reranker,
-    build_reranker_from_checkpoint,
-    save_reranker_checkpoint,
     build_tokenizer
 )
 from src.dualfid.data import (
@@ -42,6 +42,7 @@ from src.dualfid.trainer import (
 )
 
 def main(args):
+    seed_everything(args.seed)
     # set up logging
     if args.log_level == "passive":
         args.log_level = "info"
@@ -80,16 +81,19 @@ def main(args):
 
     # set up model
     if args.load_checkpoint:
-        model, optimizer, scheduler, config = build_reranker_from_checkpoint(
+        config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
+        model = build_reranker(
             args.reranker_type,
             args.model_type,
             args.model_name,
             args.cache_dir,
-            args.load_checkpoint
+            config
         )
+        state_dict = torch.load(os.path.join(args.load_checkpoint, "pytorch_model.bin"))
+        load_result = model.load_state_dict(state_dict)
+        logging.info(f"load checkpoint from {args.load_checkpoint}")
+        logging.info("load_result", load_result)
     else:
-        assert args.do_train, "Must train a new model if not loading from checkpoint"
-        optimizer, scheduler = None, None
         config = {
             "n_tasks": args.n_tasks,
             "num_pos": args.num_pos,
@@ -104,6 +108,8 @@ def main(args):
             args.cache_dir,
             config
         )
+        logging.info(f"build new model")
+
 
     # set up trainer
     training_args = TrainingArguments(
@@ -140,6 +146,9 @@ def main(args):
         label_names=args.label_names,
         evaluation_strategy=args.evaluation_strategy,
         save_strategy=args.save_strategy,
+        adafactor=args.adafactor,
+        eval_steps=args.eval_steps,
+        save_steps=args.save_steps,
     )
     logging.info(f"training args: {training_args}")
     logging.info(f"model config: {config}")
@@ -152,10 +161,11 @@ def main(args):
         data_collator=data_collator,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
-        optimizers=(optimizer, scheduler),
     )
 
-
+    if args.evaluate_first_step:
+        metrics = trainer.evaluate()
+        logging.info(f"Evaluate first step: \n{metrics}")
 
     if args.do_train:
         # set up wandb
@@ -163,7 +173,9 @@ def main(args):
             wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
             wandb.config.update(args)
         logging.info("Start training")
-        outputs = trainer.train()
+        outputs = trainer.train(
+            resume_from_checkpoint=args.load_checkpoint,
+        )
         logging.info("Training finished")
         global_step, training_loss = outputs.global_step, outputs.training_loss
         metrics = outputs.metrics
@@ -172,13 +184,9 @@ def main(args):
             logging.info(f"{key} = {value}")
 
         logging.info("Saving model")
-        best_checkpoint_folder = "checkpoint-best"
-        save_reranker_checkpoint(
-            trainer,
-            model,
-            args.output_dir,
-            best_checkpoint_folder
-        )
+        best_checkpoint_folder = os.path.join(args.output_dir, "checkpoint-best")
+        trainer.save_model(best_checkpoint_folder)
+        torch.save(model.config, os.path.join(best_checkpoint_folder, "config.bin"))
 
     if args.do_predict:
         logging.info("Start predicting")
@@ -202,6 +210,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
+
     # model config
     parser.add_argument("--reranker_type", type=str, choices=[
         "scr", "dual", "listwise", "pairwise", "pairwise_gen"
@@ -219,12 +228,8 @@ if __name__ == "__main__":
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
-    parser.add_argument("--generation_method", type=str, choices=[
-        "diverse_beam_search", "beam_search", "top_k_sampling", "top_p_sampling"
-    ], default=None)
-    parser.add_argument("--candidate_model", type=str, choices=[
-        "bart_cnndm", "bart_xum", "pegasus_cnndm", "pegasus_xsum"
-    ], default=None)
+    parser.add_argument("--candidate_generation_method", type=str, default=None)
+    parser.add_argument("--candidate_model", type=str, default=None)
     parser.add_argument("--source_maxlength", type=int, default=128)
     parser.add_argument("--candidate_maxlength", type=int, default=512)
     parser.add_argument("--num_pos", type=int, default=0)
@@ -244,23 +249,28 @@ if __name__ == "__main__":
 
     # training hyperparameters
     parser.add_argument("--train_data_path", type=str, default=None)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=8)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=1)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=32)
     parser.add_argument("--learning_rate", type=float, default=1e-5)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+    parser.add_argument("--weight_decay", type=float, default=0)
+    parser.add_argument("--max_grad_norm", type=float, default=10e10)
     parser.add_argument("--num_train_epochs", type=int, default=3)
     parser.add_argument("--max_steps", type=int, default=-1)
-    parser.add_argument("--warmup_ratio", type=float, default=0.0)
+    parser.add_argument("--warmup_ratio", type=float, default=0.05)
     parser.add_argument("--warmup_steps", type=int, default=0) # Overrides any effect of :obj:`warmup_ratio`.
     parser.add_argument("--lr_scheduler_type", type=str, choices=[
         "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
     ], default="linear")
+    parser.add_argument('--adafactor', type=bool, default=True)
 
     # evaluation hyperparameters
     parser.add_argument("--eval_data_path", type=str, default=None)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=8)
-
+    parser.add_argument("--evaluate_first_step", type=str2bool, default=False)
+    parser.add_argument("--evaluation_strategy", type=str, choices=[
+        "steps", "epoch", "no"
+    ], default="epoch")
+    parser.add_argument("--eval_steps", type=int, default=0)
 
     # predict config
     parser.add_argument("--test_data_path", type=str, default=None)
@@ -277,6 +287,10 @@ if __name__ == "__main__":
     # save config
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--overwrite_output_dir", type=str2bool, default=False)
+    parser.add_argument("--save_strategy", type=str, choices=[
+        "steps", "epoch", "no"
+    ], default="epoch")
+    parser.add_argument("--save_steps", type=int, default=0)
 
     # metrics config
     parser.add_argument("--load_best_model_at_end", type=str2bool, default=True)
@@ -291,8 +305,8 @@ if __name__ == "__main__":
 
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
     args.label_names = ["scores"]
-    args.evaluation_strategy = "epoch"
-    args.save_strategy = "epoch"
     args.run_name = args.run_name + f"_{args.loss_type}"
+    args.candidate_generation_methods = args.candidate_generation_method.split('+')
+    args.candidate_models = args.candidate_model.split('+')
 
     main(args)

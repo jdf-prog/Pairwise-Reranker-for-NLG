@@ -6,7 +6,7 @@
 
 python eval_oracle.py \
     --dataset cnndm \
-    --set val \
+    --set test \
     --eval_rouge True \
     --eval_bleu True \
     --num_workers 4 \

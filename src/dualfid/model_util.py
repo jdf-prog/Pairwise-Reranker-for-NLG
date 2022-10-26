@@ -81,22 +81,3 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
     elif reranker_type == "dual":
         reranker = DualReranker(pretrained_model, config)
     return reranker
-
-def build_reranker_from_checkpoint(reranker_type, model_type, model_name, cache_dir, checkpoint):
-    config = torch.load(os.path.join(checkpoint, "config.bin"))
-    reranker = build_reranker(reranker_type, model_type, model_name, cache_dir, config)
-    reranker.load_state_dict(torch.load(os.path.join(checkpoint, "pytorch_model.bin")))
-    optimizer = torch.load(os.path.join(checkpoint, "optimizer.pt"))
-    scheduler = torch.load(os.path.join(checkpoint, "scheduler.pt"))
-    return reranker, optimizer, scheduler, config
-
-def save_reranker_checkpoint(trainer, reranker, save_path, checkpoint_name):
-    checkpoint_dir = os.path.join(save_path, checkpoint_name)
-    # save training args and model parameters
-    trainer.save_model(checkpoint_dir)
-    # save optimizer and scheduler
-    torch.save(trainer.optimizer, os.path.join(checkpoint_dir, "optimizer.pt"))
-    torch.save(trainer.lr_scheduler, os.path.join(checkpoint_dir, "scheduler.pt"))
-    # save config
-    torch.save(reranker.config, os.path.join(checkpoint_dir, "config.bin"))
-

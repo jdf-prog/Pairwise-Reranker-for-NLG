@@ -43,55 +43,10 @@ def save_raw_dataset(dataset_name, set_name, sources, targets):
     ds = CustomDataset.from_raw(sources, targets)
     ds.to_jsonl(file_path)
 
-def save_pkl_data(dataset_name, set_name, generation_method, model_name, sources, candidates, targets):
-    """
-        Save the data to pkl files.
-        Note that the data path is hard-coded here!
-    Args:
-        data_path: the path to save the data
-        sources: the list of original sentences, [s1, s2, ...]
-        candidates: the list of candidates, [[c1_1, c1_2, c1_3], [c2_1, c2_2, c2_3], ...]
-        targets: the list of targets, [t1, t2, ...]
-    """
-    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
-    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
-    num_candidates = len(candidates[0])
-
-    print("Saving the data to pkl files...")
-    pkl_path.mkdir(parents=True, exist_ok=True)
-    postfix = f"_{model_name}"
-    torch.save(sources, pkl_path / f"sources.pkl")
-    torch.save(candidates, pkl_path / f"candidates{postfix}.pkl")
-    torch.save(targets, pkl_path / f"targets.pkl")
-    assert len(sources) == len(candidates) == len(targets)
-    print("Saved the data to pkl files!")
-
-def load_pkl_data(dataset_name, set_name, generation_method, model_name):
-    """
-        Load the data from pkl files.
-        Note that the data path is hard-coded here!
-    Args:
-        data_path: the path to load the data
-    Returns:
-        sources: the list of original sentences, [s1, s2, ...]
-        candidates: the list of candidates, [[c1_1, c1_2, c1_3], [c2_1, c2_2, c2_3], ...]
-        targets: the list of targets, [t1, t2, ...]
-    """
-    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
-    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
-    postfix = f"_{model_name}"
-    sources = torch.load(pkl_path / f"sources.pkl")
-    candidates = torch.load(pkl_path / f"candidates{postfix}.pkl")
-    targets = torch.load(pkl_path / f"targets.pkl")
-    assert len(sources) == len(candidates) == len(targets)
-    return sources, candidates, targets
-
 def load_pkl_candidates(dataset_name, set_name, generation_method, model_name):
     """
         Load the candidates from pkl files.
         Note that the data path is hard-coded here!
-    Args:
-        data_path: the path to load the data
     Returns:
         candidates: the list of candidates, [[c1_1, c1_2, c1_3], [c2_1, c2_2, c2_3], ...]
     """
@@ -101,6 +56,74 @@ def load_pkl_candidates(dataset_name, set_name, generation_method, model_name):
     candidates = torch.load(pkl_path / f"candidates{postfix}.pkl")
     return candidates
 
+def save_pkl_candidates(dataset_name, set_name, generation_method, model_name, candidates):
+    """
+        Save the candidates to pkl files.
+        Note that the data path is hard-coded here!
+    Args:
+        candidates: the list of candidates, [[c1_1, c1_2, c1_3], [c2_1, c2_2, c2_3], ...]
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
+    postfix = f"_{model_name}"
+    pkl_path.mkdir(parents=True, exist_ok=True)
+    torch.save(candidates, pkl_path / f"candidates{postfix}.pkl")
+
+def load_pkl_cand_scores(dataset_name, set_name, generation_method, model_name, metric_name):
+    """
+        Load the candidates from pkl files.
+        Note that the data path is hard-coded here!
+    Returns:
+        candidates: the list of candidates, [[c1_1, c1_2, c1_3], [c2_1, c2_2, c2_3], ...]
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
+    scores = torch.load(pkl_path / f"cand_scores_{model_name}_{metric_name}.pkl")
+    return scores
+
+def save_pkl_cand_scores(dataset_name, set_name, generation_method, model_name, metric_name, scores):
+    """
+        Save the candidates to pkl files.
+        Note that the data path is hard-coded here!
+    Args:
+        scores: the list of candidates, [[s1_1, s1_2, s1_3], [s2_1, s2_2, s2_3], ...]
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
+    pkl_path.mkdir(parents=True, exist_ok=True)
+    torch.save(scores, pkl_path / f"cand_scores_{model_name}_{metric_name}.pkl")
+
+def load_pkl_sources_and_targets(dataset_name, set_name):
+    """
+        Load the data from pkl files.
+        Note that the data path is hard-coded here!
+    Returns:
+        sources: the list of original sentences, [s1, s2, ...]
+        targets: the list of targets, [t1, t2, ...]
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    set_path = cur_folder.parent.parent / 'data' / dataset_name / set_name
+    sources = torch.load(set_path / f"sources.pkl")
+    targets = torch.load(set_path / f"targets.pkl")
+    assert len(sources) == len(targets)
+    return sources, targets
+
+def save_pkl_sources_and_targets(dataset_name, set_name, sources, targets):
+    """
+        Save the sources and targets to pkl files.
+        Note that the data path is hard-coded here!
+    Args:
+        sources: the list of original sentences, [s1, s2, ...]
+        targets: the list of targets, [t1, t2, ...]
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    set_path = cur_folder.parent.parent / 'data' / dataset_name / set_name
+    set_path.mkdir(parents=True, exist_ok=True)
+    torch.save(sources, set_path / f"sources.pkl")
+    torch.save(targets, set_path / f"targets.pkl")
+    assert len(sources) == len(targets)
+    print("Saved the data to pkl files!")
+
 def load_prepared_dataset(dataset_name, set_name) -> CustomDataset:
     """
         Load the computed and prepared dataset
@@ -109,7 +132,7 @@ def load_prepared_dataset(dataset_name, set_name) -> CustomDataset:
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     ds_path = cur_folder.parent.parent / 'data' / 'prepared' / dataset_name / set_name / 'dataset.jsonl'
     if not ds_path.exists():
-        sources, targets = load_raw_dataset(dataset_name, set_name)
+        sources, targets = load_pkl_sources_and_targets(dataset_name, set_name)
         ds = CustomDataset.from_raw(sources, targets)
     else:
         ds = CustomDataset.from_jsonl(ds_path)
@@ -135,13 +158,32 @@ def get_candidate_types(dataset_name, set_name):
     for generation_method in pkl_path.iterdir():
         if not generation_method.is_dir():
             continue
-        for model_name in generation_method.iterdir():
+        for file in generation_method.iterdir():
             if (
-                not model_name.is_file() or
-                not model_name.name.endswith('.pkl') or
-                not model_name.name.startswith('candidates')
+                not file.is_file() or
+                not file.name.endswith('.pkl') or
+                not file.name.startswith('candidates')
             ):
                 continue
-            model = model_name.stem[len('candidates_'):]
+            model = file.stem[len('candidates_'):]
             candidate_types.append((model, generation_method.name))
     return candidate_types
+
+def get_candidate_metrics(dataset_name, set_name, model_name, generation_method):
+    """
+        Get the tuples of (metric_name, metric_value)
+        for each metric and return
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
+    candidate_metrics = []
+    for file in pkl_path.iterdir():
+        if (
+            not file.is_file() or
+            not file.name.endswith('.pkl') or
+            not file.name.startswith(f'cand_scores_{model_name}_')
+        ):
+            continue
+        metric = file.stem[len(f'cand_scores_{model_name}_'):]
+        candidate_metrics.append(metric)
+    return candidate_metrics

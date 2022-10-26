@@ -167,7 +167,7 @@ class MoE(nn.Module):
         encourages all experts to be approximately equally used across a batch.
         """
         all_y = []
-        all_loss = torch.tensor(0.0).cuda()
+        all_loss = torch.tensor(0.0).to(x.device)
         for gate_idx in range(self.n_tasks):
             gates, load = self.noisy_top_k_gating(gate_idx, x, train)
             # calculate importance loss

@@ -75,9 +75,13 @@ def get_truncated_text(texts, tokenizer, max_length):
     """
     truncated_texts = []
     for text in texts:
-        tokens = tokenizer.tokenize(text)
-        tokens = tokens[:max_length]
-        truncated_texts.append(tokenizer.convert_tokens_to_string(tokens))
+        tokens = tokenizer.encode(
+            text,
+            add_special_tokens=True,
+            max_length=max_length,
+            truncation=True,
+        )
+        truncated_texts.append(tokenizer.decode(tokens, skip_special_tokens=True))
     return truncated_texts
 
 class SCRCollator(object):
@@ -89,8 +93,8 @@ class SCRCollator(object):
         self.sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else tokenizer.eos_token
         self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
         assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
-        self.cls_token = self.cls_token if self.cls_token is not None else ""
-        self.separate_token = self.sep_token + ' ' + self.cls_token # used to separate 2 concatenated texts
+        self.sep_token = "[SEP]" # debug
+        self.separate_token = self.sep_token
         self.postfix = postfix
         self.target_maxlength = self.candidate_maxlength
 
@@ -253,10 +257,10 @@ def load_data(data_path, args):
                 "rouge2": candidate['scores']['rouge2'],
                 "rougeL": candidate['scores']['rougeLsum'],
             }
-        if args.candidate_model is not None:
-            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['model'] == args.candidate_model]
-        if args.generation_method is not None:
-            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] == args.generation_method]
+        if args.candidate_models is not None:
+            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['model'] in args.candidate_models]
+        if args.candidate_generation_methods is not None:
+            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] in args.candidate_generation_methods]
 
     for k, example in enumerate(data):
         if not 'id' in example:

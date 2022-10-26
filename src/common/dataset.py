@@ -58,36 +58,36 @@ class CustomDataset:
         # evaluate and record the metric values
         candidates = [[c['text'] for c in item['candidates']] for item in self.items]
         targets = [item['target'] for item in self.items]
-        if num_workers > 1:
-            cpu_num = psutil.cpu_count(logical=False)
-            num_workers = min(num_workers, cpu_num)
-            self.logger.info("Using {} workers to evaluate".format(num_workers))
-            chunk_size = len(candidates) // num_workers + 1
-            candidates_chunks = [candidates[i:i + chunk_size] for i in range(0, len(candidates), chunk_size)]
-            targets_chunks = [targets[i:i + chunk_size] for i in range(0, len(targets), chunk_size)]
-            datas = [(candidates_chunks[i], targets_chunks[i], metrics) for i in range(len(candidates_chunks))]
-            scores_chunks = process_map(overall_eval_multi_process, datas, chunksize=1, max_workers=num_workers)
-            scores = {}
-            for chunk in scores_chunks:
-                for k, v in chunk.items():
-                    scores[k] = scores.get(k, []) + v
-        else:
-            scores = overall_eval(candidates, targets, metrics)
+        scores = overall_eval(candidates, targets, metrics_to_prepare, num_workers)
 
         for i, item in enumerate(self.items):
             for j, cand in enumerate(item['candidates']):
-                for metric in metrics:
+                for metric in metrics_to_prepare:
                     cand['scores'][metric] = scores[metric][i][j]
 
         self.logger.info('Finish preparing metrics {}.'.format(metrics_to_prepare))
         self.logger.info('The current available metrics are {}'.format(self.prepared_metrics))
+
+    def get_metric_scores(self, metric, model_name, generation_method):
+        """
+        get the scores of the specified metric, model and generation method
+        """
+        scores = []
+        for item in self.items:
+            items_scores = []
+            for cand in item['candidates']:
+                if cand['model'] == model_name and cand['generation_method'] == generation_method:
+                    items_scores.append(cand['scores'][metric])
+            scores.append(items_scores)
+        return scores
 
 
     def add_candidates(
         self,
         model:str,
         generation_method: str,
-        candidates:Union[List[str], List[List[str]]],):
+        candidates:Union[List[str], List[List[str]]],
+        scores: Union[Dict[str, List[float]], Dict[str, List[List[float]]]]=None,):
         """
         Add candidates from the model to the data.
 
@@ -95,18 +95,29 @@ class CustomDataset:
             model: the name of the model
             generation_method: the name of the generation method
             candidates: the list of candidate texts
+            scores
         """
         assert len(candidates) == len(self.items), "Number of candidates must be equal to number of items: {} != {}".format(len(candidates), len(self.items))
-        for item, cands in zip(self.items, candidates):
+        for i, (item, cands) in enumerate(zip(self.items, candidates)):
             if isinstance(cands, str):
-                cands = [cands]
-            for cand in cands:
+                cand = cands
+                cand_scores = {k: v[i] for k, v in scores.items()} if scores is not None else {}
                 item['candidates'].append({
                     "model": model,
                     "generation_method": generation_method,
-                    "text": cand,
-                    "scores": {}
+                    "text": cands,
+                    "scores": cand_scores
                 })
+            else:
+                # if the candidates are a list of candidates
+                for j, cand in enumerate(cands):
+                    cand_scores = {k: v[i][j] for k, v in scores.items()} if scores is not None else {}
+                    item['candidates'].append({
+                        "model": model,
+                        "generation_method": generation_method,
+                        "text": cand,
+                        "scores": cand_scores
+                    })
 
     @classmethod
     def from_structured(cls, items:List[Dict]):

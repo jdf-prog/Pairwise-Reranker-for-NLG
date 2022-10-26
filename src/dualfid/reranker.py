@@ -1,3 +1,4 @@
+import argparse
 from enum import unique
 import sys
 import transformers
@@ -53,7 +54,7 @@ class SCR(nn.Module):
         self.hidden_size = self.pretrained_model.config.hidden_size
 
         if self.loss_type == "BCE":
-            self.bottom_hidden_size = self.hidden_size * 2
+            self.bottom_hidden_size = self.hidden_size
             # shared bottom
             self.fc1 = nn.Linear(self.hidden_size, self.bottom_hidden_size)
             self.relu = nn.ReLU()
@@ -68,52 +69,47 @@ class SCR(nn.Module):
         elif self.loss_type == "ListMLE":
             self.regression_layer = nn.Sequential(
                 nn.Dropout(self.drop_out),
-                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.Linear(self.hidden_size, 2 * self.hidden_size),
                 nn.Tanh(),
                 nn.Dropout(self.drop_out),
-                nn.Linear(self.hidden_size, 1),
+                nn.Linear(2 * self.hidden_size, 1),
             )
         elif self.loss_type == "ListNet":
             self.regression_layer = nn.Sequential(
                 nn.Dropout(self.drop_out),
-                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.Linear(self.hidden_size, 2 * self.hidden_size),
                 nn.Tanh(),
                 nn.Dropout(self.drop_out),
-                nn.Linear(self.hidden_size, 1),
+                nn.Linear(2 * self.hidden_size, 1),
             )
             self.loss = nn.CrossEntropyLoss()
 
-
-    def BCE_loss(self, encs, scores):
+    def BCE_loss(self, encs, labels):
         """
             SummareReranker
         Args:
-            encs: [batch_size * n_candidate, hidden_size]
-            scores: [batch_size, n_candidate, n_task]
+            encs: [batch_size, n_candidate, hidden_size]
+            labels: [batch_size, n_candidate, n_task]
         Return:
             loss: [1]
             preds: [batch_size, n_candidate]
         """
-        batch_size, n_candidate, n_task = scores.shape
+        batch_size, n_candidate, n_task = labels.shape
         # shared bottom
-        encs = self.fc2(self.relu(self.fc1(encs)))
+        encs = self.fc2(self.relu(self.fc1(encs))).reshape(batch_size * n_candidate, -1)
         # MoE
         moe_preds, aux_loss = self.moe(encs, train = self.training, collect_gates = not(self.training))
         # go to towers for different tasks
-        pred_scores_for_n_tasks = torch.cat([
+        pred_scores = torch.cat([
             tower(moe_pred) for moe_pred, tower in zip(moe_preds, self.towers)
-        ], dim=-1) # [batch_size * n_candidate, n_task]
+        ], dim=-1).reshape(batch_size, n_candidate, n_task)
         # compute loss
-        labels_for_n_tasks = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]) # only the best one, [batch_size, n_candidate, n_task]
-        labels_for_n_tasks = labels_for_n_tasks.view(-1, n_task).float().to(encs.device)
-        loss = self.loss(pred_scores_for_n_tasks, labels_for_n_tasks)
+        loss = self.loss(pred_scores, labels)
         loss += aux_loss
-
         # return loss and logits
-        pred_scores_for_n_tasks = torch.sum(
-            self.sigmoid(pred_scores_for_n_tasks).reshape(batch_size, n_candidate, -1)
-        , dim=-1) # to output, [batch_size, n_candidate]
-        return loss, pred_scores_for_n_tasks
+        pred_scores = torch.mean(pred_scores, dim=-1).detach().reshape(batch_size, n_candidate)
+        pred_scores = self.sigmoid(pred_scores)
+        return loss, pred_scores
 
     def forward(self, input_ids, attention_mask, scores):
         """
@@ -122,12 +118,13 @@ class SCR(nn.Module):
             attention_mask: [batch_size, n_candidate, seq_len]
             scores: [batch_size, n_candidate, n_task]
         """
+
+        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(input_ids.device)
         if self.training:
             # sub sampling candidates if needed
             if self.num_pos > 0 and self.num_neg > 0:
-                input_ids, attention_mask, scores = \
-                    sub_sampling(input_ids, attention_mask, scores, self.num_pos, self.num_neg)
-        loss = torch.tensor(0.0).to(input_ids.device)
+                sub_idx, input_ids, attention_mask, scores, labels = \
+                    sub_sampling(input_ids, attention_mask, scores, labels, self.num_pos, self.num_neg)
 
         batch_size, n_candidate, seq_len = input_ids.shape
 
@@ -141,7 +138,7 @@ class SCR(nn.Module):
         encs = outputs["last_hidden_state"][:, 0, :] # [batch_size * n_candidate, hidden_size]
 
         if self.loss_type == "BCE":
-            loss, pred_scores = self.BCE_loss(encs, scores)
+            loss, pred_scores = self.BCE_loss(encs.reshape(batch_size, n_candidate, -1), labels)
         elif self.loss_type == "ListMLE":
             sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
             pred_scores = self.regression_layer(encs).reshape(batch_size, n_candidate) # [batch_size, n_candidate]
@@ -224,12 +221,12 @@ class DualReranker(nn.Module):
             candidate_attention_mask: [batch_size, n_candidate, seq_len]
             scores: [batch_size, n_candidate, n_task]
         """
+        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(source_ids.device)
         if self.training:
             if self.num_pos > 0 and self.num_neg > 0:
-                candidate_ids, candidate_attention_mask, scores = \
-                    sub_sampling(candidate_ids, candidate_attention_mask, scores, self.num_pos, self.num_neg)
+                sub_idx, candidate_ids, candidate_attention_mask, scores, labels = \
+                    sub_sampling(candidate_ids, candidate_attention_mask, scores, labels, self.num_pos, self.num_neg)
 
-        loss = torch.tensor(0.0).to(source_ids.device)
         batch_size, n_candidate, candidate_seq_len = candidate_ids.shape
         _, source_seq_len = source_ids.shape
         n_task = scores.shape[-1]
@@ -250,13 +247,11 @@ class DualReranker(nn.Module):
             output_hidden_states = True
         )["last_hidden_state"][:, 0, :].reshape(batch_size, n_candidate, -1) # [batch_size, n_candidate, hidden_size]
 
-
         # compute similarity matrix
         source_encs = F.normalize(source_encs, dim=-1)
         candidate_encs = F.normalize(candidate_encs, dim=-1)
         sim_mat = torch.matmul(source_encs, candidate_encs.transpose(1, 2)).squeeze(1) # [batch_size, n_candidate]
         sum_scores = torch.sum(scores, dim=-1).to(source_ids.device) # [batch_size, n_candidate]
-        labels = torch.eq(sum_scores, torch.max(sum_scores, dim=1, keepdim=True)[0]).float() # only the best one, [batch_size, n_candidate]
 
         if self.loss_type == "BCE":
             loss = F.binary_cross_entropy_with_logits(sim_mat, labels)
@@ -320,6 +315,143 @@ class CrossCompareReranker(nn.Module):
             4. BYOL (bootstrap your own latent)
             5. Barlow Twins
     """
+    def __init__(self, pretrained_model, args):
+        super(SCR, self).__init__()
+        self.args = args
+        self.n_tasks = self.args["n_tasks"]
+        self.num_pos = self.args["num_pos"]
+        self.num_neg = self.args["num_neg"]
+        self.loss_type = self.args["loss_type"]
+        self.top_k_permutation = self.args.get("top_k_permutation", 1)
+        self.drop_out = self.args.get("drop_out", 0.05)
+
+        # LM
+        self.pretrained_model = pretrained_model
+        self.hidden_size = self.pretrained_model.config.hidden_size
+
+        if self.loss_type == "BCE":
+            self.bottom_hidden_size = self.hidden_size
+            # shared bottom
+            self.fc1 = nn.Linear(self.hidden_size, self.bottom_hidden_size)
+            self.relu = nn.ReLU()
+            self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
+            # MoE
+            self.moe = MoE(self.n_tasks, self.hidden_size, self.hidden_size, 2*self.n_tasks, self.hidden_size, k=self.n_tasks)
+            # towers - one for each task
+            self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
+            self.sigmoid = nn.Sigmoid()
+
+        elif self.loss_type == "ListMLE":
+            self.regression_layer = nn.Sequential(
+                nn.Dropout(self.drop_out),
+                nn.Linear(self.hidden_size, 2 * self.hidden_size),
+                nn.Tanh(),
+                nn.Dropout(self.drop_out),
+                nn.Linear(2 * self.hidden_size, 1),
+            )
+        elif self.loss_type == "ListNet":
+            self.regression_layer = nn.Sequential(
+                nn.Dropout(self.drop_out),
+                nn.Linear(self.hidden_size, 2 * self.hidden_size),
+                nn.Tanh(),
+                nn.Dropout(self.drop_out),
+                nn.Linear(2 * self.hidden_size, 1),
+            )
+
+    def BCE_loss(self, encs, labels):
+        """
+            SummareReranker
+        Args:
+            encs: [batch_size, n_pairs, hidden_size]
+            labels: [batch_size, n_pairs, n_task]
+        Return:
+            loss: [1]
+            preds: [batch_size, n_pairs]
+        """
+        batch_size, n_pairs, hidden_size = encs.shape
+        batch_size, n_pairs, n_task = labels.shape
+        # shared bottom
+        encs = self.fc2(self.relu(self.fc1(encs))).reshape(batch_size * n_pairs, -1)
+        # MoE
+        moe_preds, aux_loss = self.moe(encs, train = self.training, collect_gates = not(self.training))
+        # go to towers for different tasks
+        pred_scores = torch.cat([
+            tower(moe_pred) for moe_pred, tower in zip(moe_preds, self.towers)
+        ], dim=-1).reshape(batch_size, n_pairs, n_task)
+        # compute loss
+        loss = F.binary_cross_entropy_with_logits(pred_scores, labels, reduction="none")
+        torch.sum(torch.mean(loss, dim=(1,2)))
+        loss += aux_loss
+
+        # return loss and logits
+        pred_scores = torch.mean(pred_scores, dim=-1).detach().reshape(batch_size, n_pairs)
+        pred_scores = self.sigmoid(pred_scores)
+        return loss, pred_scores
+
+    def forward(self, input_ids, attention_mask, scores, sep_token):
+        """
+        Args:
+            input_ids: [batch_size, n_pairs, seq_len]
+            attention_mask: [batch_size, n_pairs, seq_len]
+            scores: [batch_size, n_pairs, n_task]
+        """
+        device = input_ids.device
+
+        batch_size, n_pairs, seq_len = input_ids.shape
+        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(device)
+
+        if self.training:
+            # sub sampling candidates if needed
+            if self.num_pos > 0 and self.num_neg > 0:
+                sub_idx, input_ids, attention_mask, scores, labels = \
+                    sub_sampling(input_ids, attention_mask, scores, labels, self.num_pos, self.num_neg)
+        loss = torch.tensor(0.0).to(device)
+
+        to_model_input_ids = input_ids.view(-1, seq_len)
+        to_model_attention_mask = attention_mask.view(-1, seq_len)
+        outputs = self.pretrained_model(
+            input_ids=to_model_input_ids,
+            attention_mask=to_model_attention_mask,
+            output_hidden_states = True
+        )
+
+        # select the representation of the sep_token from the 2 candidates
+        encs = outputs["last_hidden_state"].reshape(batch_size, n_pairs, seq_len, self.hidden_size)
+        for i in range(batch_size):
+            for j in range(n_pairs):
+                sep_indices = torch.nonzero(torch.eq(input_ids[i,j], sep_token)).squeeze(1)
+                assert len(sep_indices) == 3, "sep_token should be 3"
+                sep_indices = sep_indices[:2]
+                encs[i,j] = encs[i,j,sep_indices]
+        encs_1 = encs[:, :, 0] # [batch_size, n_pairs, hidden_size]
+        encs_2 = encs[:, :, 1] # [batch_size, n_pairs, hidden_size]
+
+
+        # compute similarity matrix
+        encs_1 = F.normalize(encs[:, :, 0], dim=-1)
+        encs_2 = F.normalize(encs[:, :, 1], dim=-1)
+        sim_mat = torch.matmul(encs_1, encs_2.transpose(1, 2)).squeeze(1) # [batch_size, n_candidate]
+        sum_scores = torch.sum(scores, dim=-1).to(device) # [batch_size, n_candidate]
+
+        # TODO: compute pairwise loss
+
+        if self.loss_type == "BCE":
+            loss = F.binary_cross_entropy_with_logits(sim_mat, labels)
+        elif self.loss_type == "infoNCE":
+            loss = infoNCE_loss(sim_mat, labels)
+        elif self.loss_type == "ListMLE":
+            loss = ListMLE_loss(sim_mat, sum_scores)
+        elif self.loss_type == "ListNet":
+            loss = ListNet_loss(sim_mat, sum_scores, self.top_k_permutation)
+        else:
+            raise ValueError("Loss type not supported")
+
+        outputs = {
+            "loss": loss,
+            "preds": sim_mat,
+        }
+        return outputs
+
 
 
 class T5CrossCompareReranker(nn.Module):
@@ -364,12 +496,13 @@ class T5CompareGenReranker(nn.Module):
             5. Barlow Twins
     """
 
-def sub_sampling(input_ids, attention_mask, scores, num_pos, num_neg, mode="bottom"):
+def sub_sampling(input_ids, attention_mask, scores, labels, num_pos, num_neg, mode="bottom"):
     """
     Args:
         input_ids: [batch_size, n_candidate, seq_len]
         attention_mask: [batch_size, n_candidate, seq_len]
         scores: [batch_size, n_candidate, n_task]
+        labels: [batch_size, n_candidate, n_task]
         num_pos: int
         num_neg: int
         mode: str, "bottom" or "random"
@@ -397,10 +530,12 @@ def sub_sampling(input_ids, attention_mask, scores, num_pos, num_neg, mode="bott
         else:
             raise NotImplementedError
         idx = np.concatenate([pos_idx, neg_idx])
+        np.random.shuffle(idx)
         idx = unique_idx[idx]
         selected_idx.append(idx)
     selected_idx = torch.tensor(selected_idx).to(input_ids.device)
     input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
     attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
     scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-    return input_ids, attention_mask, scores
+    labels = labels[torch.arange(batch_size).unsqueeze(-1), selected_idx]
+    return selected_idx, input_ids, attention_mask, scores, labels

@@ -10,13 +10,20 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.data import (
     load_pkl_candidates,
-    load_prepared_dataset,
-    save_prepared_dataset,
-    get_candidate_types
+    save_pkl_cand_scores,
+    get_candidate_types,
+    get_candidate_metrics,
+    load_pkl_sources_and_targets
+)
+from common.dataset import (
+    CustomDataset,
 )
 from common.utils import (
     seed_everything,
     str2bool,
+)
+from common.evaluation import (
+    overall_eval
 )
 from pathlib import Path
 
@@ -24,17 +31,6 @@ from pathlib import Path
 def main(args):
     # seed
     seed_everything(args.seed)
-    ds = load_prepared_dataset(args.dataset, args.set)
-
-    # model and generation_method of current computed candidates
-    types = get_candidate_types(args.dataset, args.set)
-
-    # add candidates if the curent model and generation_method are not in the dataset
-    to_load_types = set(types) - set(ds.candidate_counts.keys())
-    for model_name, generation_method in to_load_types:
-        print("Loading candidates from -- model:{} \t generation method:{}".format(model_name, generation_method))
-        candidates= load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
-        ds.add_candidates(model_name, generation_method, candidates)
 
     # prepare metrics
     metrics = []
@@ -44,11 +40,24 @@ def main(args):
         metrics.extend(["bleu"])
     if args.eval_bleurt:
         metrics.extend(["bleurt"])
-    ds.prepare_metrics(metrics, args.num_workers)
-    save_prepared_dataset(args.dataset, args.set, ds)
 
-    # analyze the oracle
-    ds.analyze_oracle()
+    # model and generation_method of current computed candidates
+    types = get_candidate_types(args.dataset, args.set)
+    sources, targets = load_pkl_sources_and_targets(args.dataset, args.set)
+    # add candidates if the curent model and generation_method are not in the dataset
+    for model_name, generation_method in types:
+        print("Checking candidates scores from -- model:{} \t generation method:{}".format(model_name, generation_method))
+        scored_metrics = get_candidate_metrics(args.dataset, args.set, model_name, generation_method)
+        print("Scored metrics: {}".format(scored_metrics))
+        to_score_metrics = [metric for metric in metrics if metric not in scored_metrics]
+        if len(to_score_metrics) == 0:
+            print("All metrics are already computed for -- model:{} \t generation method:{}".format(model_name, generation_method))
+            continue
+        print("Computing metrics: {}".format(to_score_metrics))
+        candidates = load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
+        scores = overall_eval(candidates, targets, to_score_metrics, args.num_workers)
+        for k, v in scores.items():
+            save_pkl_cand_scores(args.dataset, args.set, generation_method, model_name, k, v)
 
 
 if __name__ == "__main__":

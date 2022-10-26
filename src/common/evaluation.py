@@ -9,6 +9,7 @@ from torch import split
 from tqdm import tqdm
 from nltk import sent_tokenize
 from rouge_score import rouge_scorer
+from tqdm.contrib.concurrent import process_map
 logging.set_verbosity(logging.WARNING)
 
 
@@ -100,7 +101,7 @@ def overall_eval_multi_process(data):
     print("Worker {} is evaluating".format(cpu_id))
     return overall_eval(candidates, targets, metrics)
 
-def overall_eval(candidates, targets, metrics:List[str]):
+def _overall_eval(candidates, targets, metrics:List[str]):
     scores = {}
     rouge_tyeps = [metric for metric in metrics if metric.startswith('rouge')]
     if rouge_tyeps:
@@ -113,3 +114,23 @@ def overall_eval(candidates, targets, metrics:List[str]):
         bleurt_scores = eval_bleurt(candidates, targets)
         scores.update({'bleurt': bleurt_scores})
     return scores
+
+def overall_eval(candidates, targets, metrics:List[str], num_workers:int=1):
+    if num_workers > 1:
+        cpu_num = psutil.cpu_count(logical=False)
+        num_workers = min(num_workers, cpu_num)
+        print("Using {} workers to evaluate".format(num_workers))
+        chunk_size = len(candidates) // num_workers + 1
+        candidates_chunks = [candidates[i:i + chunk_size] for i in range(0, len(candidates), chunk_size)]
+        targets_chunks = [targets[i:i + chunk_size] for i in range(0, len(targets), chunk_size)]
+        datas = [(candidates_chunks[i], targets_chunks[i], metrics) for i in range(len(candidates_chunks))]
+        scores_chunks = process_map(overall_eval_multi_process, datas, chunksize=1, max_workers=num_workers)
+        scores = {}
+        for chunk in scores_chunks:
+            for k, v in chunk.items():
+                scores[k] = scores.get(k, []) + v
+    else:
+        scores = _overall_eval(candidates, targets, metrics)
+    return scores
+
+

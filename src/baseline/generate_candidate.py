@@ -26,7 +26,8 @@ from common.utils import (
 )
 from common.data import (
     load_raw_dataset,
-    save_pkl_data,
+    save_pkl_candidates,
+    save_pkl_sources_and_targets,
 )
 from common.dataset import CustomDataset
 from pathlib import Path
@@ -161,7 +162,8 @@ def main(args):
     sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args)
     # export
     if args.save_candidates:
-        save_pkl_data(args.dataset, args.set, args.generation_method, args.model_name, sources, candidates, targets)
+        save_pkl_sources_and_targets(args.dataset, args.set, sources, targets)
+        save_pkl_candidates(args.dataset, args.set, args.generation_method, args.model_name, candidates)
 
 class GenerationDataset(torch.utils.data.Dataset):
     """
