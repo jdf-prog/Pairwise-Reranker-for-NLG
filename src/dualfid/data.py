@@ -163,6 +163,43 @@ class DualCollator(object):
             'scores' : torch.stack(batch_scores, dim=0),
         }
 
+class CCCollator(object):
+    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+        self.tokenizer = tokenizer
+        self.source_maxlength = source_maxlength
+        self.candidate_maxlength = candidate_maxlength
+
+        self.sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else tokenizer.eos_token
+        self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
+        assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
+        self.sep_token = "[SEP]" # debug
+        self.separate_token = self.sep_token
+        self.postfix = postfix
+        self.target_maxlength = self.candidate_maxlength
+
+
+    def __call__(self, batch):
+        batch_size = len(batch)
+        batch_source = [b['source'] for b in batch]
+        batch_target = [b['target'] for b in batch]
+        batch_candidates = [b['candidates'] for b in batch]
+        batch_scores = [b['scores'] for b in batch]
+        batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
+        batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
+
+        if self.postfix is not None:
+            texts = [[self.separate_token.join([s, c, self.postfix]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
+        else:
+            texts = [[self.separate_token.join([s, c]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
+
+        encoded_text_ids, encoded_text_masks = encode_batch_text(texts, self.tokenizer, self.tokenizer.model_max_length)
+
+        return {
+            'input_ids' : encoded_text_ids,
+            'attention_mask' : encoded_text_masks,
+            'scores' : torch.stack(batch_scores, dim=0),
+        }
+
 class DualFiDCollator(object):
     def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
         self.tokenizer = tokenizer

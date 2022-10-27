@@ -91,15 +91,20 @@ def main(args):
         )
         state_dict = torch.load(os.path.join(args.load_checkpoint, "pytorch_model.bin"))
         load_result = model.load_state_dict(state_dict)
-        logging.info(f"load checkpoint from {args.load_checkpoint}")
-        logging.info("load_result", load_result)
+        if load_result.missing_keys:
+            logging.warning(f"Missing keys: {load_result.missing_keys}")
+        else:
+            logging.info(f"Successfully loaded checkpoint from '{args.load_checkpoint}'")
     else:
         config = {
             "n_tasks": args.n_tasks,
             "num_pos": args.num_pos,
             "num_neg": args.num_neg,
+            "sub_sampling_ratio": args.sub_sampling_ratio,
+            "sub_sampling_mode": args.sub_sampling_mode,
             "loss_type": args.loss_type,
             "top_k_permutation": args.top_k_permutation,
+
         }
         model = build_reranker(
             args.reranker_type,
@@ -186,7 +191,7 @@ def main(args):
         logging.info("Saving model")
         best_checkpoint_folder = os.path.join(args.output_dir, "checkpoint-best")
         trainer.save_model(best_checkpoint_folder)
-        torch.save(model.config, os.path.join(best_checkpoint_folder, "config.bin"))
+        torch.save(model.args, os.path.join(best_checkpoint_folder, "config.bin"))
 
     if args.do_predict:
         logging.info("Start predicting")
@@ -222,7 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_checkpoint", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
-      "BCE", "infoNCE", "ListNet", "ListMLE", ""
+      "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE"
     ], default="BCE")
     parser.add_argument("--top_k_permutation", type=int, default=1)
 
@@ -234,6 +239,11 @@ if __name__ == "__main__":
     parser.add_argument("--candidate_maxlength", type=int, default=512)
     parser.add_argument("--num_pos", type=int, default=0)
     parser.add_argument("--num_neg", type=int, default=0)
+    parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
+    parser.add_argument("--sub_sampling_mode", type=str, choices=[
+        "uniform", "top_bottom", "top_random", "random_bottom",
+        "importance"
+    ], default="top_bottom")
 
     # running config
     parser.add_argument("--seed", type=int, default=42)
@@ -281,8 +291,9 @@ if __name__ == "__main__":
     parser.add_argument("--logging_steps", type=int, default=5)
     parser.add_argument("--log_level", type=str, default="passive",
         choices=["passive", "info", "debug", "warning", "error", "critical"])
-    parser.add_argument("--report_to", type=str, default="wandb")
+    parser.add_argument("--report_to", type=str, default=None)
     parser.add_argument("--run_name", type=str, default="basic") # wandb run name
+
 
     # save config
     parser.add_argument("--output_dir", type=str, default=None)
@@ -299,14 +310,16 @@ if __name__ == "__main__":
     # init args
     args = parser.parse_args()
     args.load_best_model_at_end = args.do_train and args.do_predict
+    args.run_name = f"{args.run_name}_{args.loss_type}"
     # set up default output dir
     if args.output_dir is None:
         args.output_dir = f"outputs/{args.reranker_type}/{args.model_name}/{args.run_name}"
 
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
     args.label_names = ["scores"]
-    args.run_name = args.run_name + f"_{args.loss_type}"
+
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
 
     main(args)
+

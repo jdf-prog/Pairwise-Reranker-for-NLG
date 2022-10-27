@@ -10,9 +10,12 @@ import torch.nn.functional as F
 import os
 from dualfid.layers import (
     MoE,
+)
+from dualfid.loss import (
     infoNCE_loss,
     ListNet_loss,
     ListMLE_loss,
+    p_ListMLE_loss
 )
 from copy import deepcopy
 import transformers.trainer
@@ -43,6 +46,8 @@ class SCR(nn.Module):
         super(SCR, self).__init__()
         self.args = args
         self.n_tasks = self.args["n_tasks"]
+        self.sub_sampling_mode = self.args["sub_sampling_mode"]
+        self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
         self.loss_type = self.args["loss_type"]
@@ -84,32 +89,24 @@ class SCR(nn.Module):
             )
             self.loss = nn.CrossEntropyLoss()
 
-    def BCE_loss(self, encs, labels):
+    def MoE_forawrd(self, encs):
         """
             SummareReranker
         Args:
-            encs: [batch_size, n_candidate, hidden_size]
-            labels: [batch_size, n_candidate, n_task]
+            encs: [batch_size*n_candidate, hidden_size]
         Return:
-            loss: [1]
-            preds: [batch_size, n_candidate]
+            preds: [batch_size, n_candidate, n_tasks]
+            aus_loss: float
         """
-        batch_size, n_candidate, n_task = labels.shape
         # shared bottom
-        encs = self.fc2(self.relu(self.fc1(encs))).reshape(batch_size * n_candidate, -1)
+        encs = self.fc2(self.relu(self.fc1(encs)))
         # MoE
         moe_preds, aux_loss = self.moe(encs, train = self.training, collect_gates = not(self.training))
         # go to towers for different tasks
         pred_scores = torch.cat([
             tower(moe_pred) for moe_pred, tower in zip(moe_preds, self.towers)
-        ], dim=-1).reshape(batch_size, n_candidate, n_task)
-        # compute loss
-        loss = self.loss(pred_scores, labels)
-        loss += aux_loss
-        # return loss and logits
-        pred_scores = torch.mean(pred_scores, dim=-1).detach().reshape(batch_size, n_candidate)
-        pred_scores = self.sigmoid(pred_scores)
-        return loss, pred_scores
+        ], dim=-1)
+        return pred_scores, aux_loss
 
     def forward(self, input_ids, attention_mask, scores):
         """
@@ -122,11 +119,14 @@ class SCR(nn.Module):
         labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(input_ids.device)
         if self.training:
             # sub sampling candidates if needed
-            if self.num_pos > 0 and self.num_neg > 0:
-                sub_idx, input_ids, attention_mask, scores, labels = \
-                    sub_sampling(input_ids, attention_mask, scores, labels, self.num_pos, self.num_neg)
+            sub_idx, input_ids, attention_mask, scores, labels = \
+                sub_sampling(
+                    self.sub_sampling_mode, self.num_pos, self.num_neg, self.sub_sampling_ratio,
+                    input_ids, attention_mask, scores, labels
+                )
 
         batch_size, n_candidate, seq_len = input_ids.shape
+        batch_size, n_candidate, n_task = scores.shape
 
         to_model_input_ids = input_ids.view(-1, seq_len)
         to_model_attention_mask = attention_mask.view(-1, seq_len)
@@ -138,7 +138,14 @@ class SCR(nn.Module):
         encs = outputs["last_hidden_state"][:, 0, :] # [batch_size * n_candidate, hidden_size]
 
         if self.loss_type == "BCE":
-            loss, pred_scores = self.BCE_loss(encs.reshape(batch_size, n_candidate, -1), labels)
+            pred_scores, aux_loss = self.MoE_forawrd(encs)
+            pred_scores = pred_scores.reshape(batch_size, n_candidate, n_task)
+            # compute loss
+            loss = self.loss(pred_scores, labels)
+            loss += aux_loss
+            # return loss and logits
+            pred_scores = torch.mean(pred_scores, dim=-1).detach().reshape(batch_size, n_candidate)
+            pred_scores = self.sigmoid(pred_scores)
         elif self.loss_type == "ListMLE":
             sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
             pred_scores = self.regression_layer(encs).reshape(batch_size, n_candidate) # [batch_size, n_candidate]
@@ -147,6 +154,10 @@ class SCR(nn.Module):
             sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
             pred_scores = self.regression_layer(encs).reshape(batch_size, n_candidate) # [batch_size, n_candidate]
             loss = ListNet_loss(pred_scores, sum_scores, self.top_k_permutation)
+        elif self.loss_type == "p_ListMLE":
+            sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
+            pred_scores = self.regression_layer(encs).reshape(batch_size, n_candidate) # [batch_size, n_candidate]
+            loss = p_ListMLE_loss(pred_scores, sum_scores)
 
         outputs = {
             "loss": loss,
@@ -201,6 +212,8 @@ class DualReranker(nn.Module):
     def __init__(self, pretrained_model, args):
         super(DualReranker, self).__init__()
         self.args = args
+        self.sub_sampling_mode = self.args["sub_sampling_mode"]
+        self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
         self.loss_type = self.args["loss_type"]
@@ -221,11 +234,14 @@ class DualReranker(nn.Module):
             candidate_attention_mask: [batch_size, n_candidate, seq_len]
             scores: [batch_size, n_candidate, n_task]
         """
-        labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(source_ids.device)
+        sum_scores = torch.sum(scores, dim=-1) # [batch_size, n_candidate]
+        labels = torch.eq(sum_scores, torch.max(sum_scores, dim=1, keepdim=True)[0]).float().to(source_ids.device) # [batch_size, n_candidate]
         if self.training:
-            if self.num_pos > 0 and self.num_neg > 0:
-                sub_idx, candidate_ids, candidate_attention_mask, scores, labels = \
-                    sub_sampling(candidate_ids, candidate_attention_mask, scores, labels, self.num_pos, self.num_neg)
+            sub_idx, candidate_ids, candidate_attention_mask, scores, labels = \
+                sub_sampling(
+                    self.sub_sampling_mode, self.num_pos, self.num_neg, self.sub_sampling_ratio,
+                    candidate_ids, candidate_attention_mask, scores, labels
+                )
 
         batch_size, n_candidate, candidate_seq_len = candidate_ids.shape
         _, source_seq_len = source_ids.shape
@@ -261,6 +277,8 @@ class DualReranker(nn.Module):
             loss = ListMLE_loss(sim_mat, sum_scores)
         elif self.loss_type == "ListNet":
             loss = ListNet_loss(sim_mat, sum_scores, self.top_k_permutation)
+        elif self.loss_type == "p_ListMLE":
+            loss = p_ListMLE_loss(sim_mat, sum_scores)
         else:
             raise ValueError("Loss type not supported")
 
@@ -321,6 +339,8 @@ class CrossCompareReranker(nn.Module):
         self.n_tasks = self.args["n_tasks"]
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
+        self.sub_sampling_mode = self.args["sub_sampling_mode"]
+        self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.loss_type = self.args["loss_type"]
         self.top_k_permutation = self.args.get("top_k_permutation", 1)
         self.drop_out = self.args.get("drop_out", 0.05)
@@ -402,9 +422,11 @@ class CrossCompareReranker(nn.Module):
 
         if self.training:
             # sub sampling candidates if needed
-            if self.num_pos > 0 and self.num_neg > 0:
-                sub_idx, input_ids, attention_mask, scores, labels = \
-                    sub_sampling(input_ids, attention_mask, scores, labels, self.num_pos, self.num_neg)
+            sub_idx, input_ids, attention_mask, scores, labels = \
+                sub_sampling(
+                    self.sub_sampling_mode, self.num_pos, self.num_neg, self.sub_sampling_ratio,
+                    input_ids, attention_mask, scores, labels
+                )
         loss = torch.tensor(0.0).to(device)
 
         to_model_input_ids = input_ids.view(-1, seq_len)
@@ -496,46 +518,73 @@ class T5CompareGenReranker(nn.Module):
             5. Barlow Twins
     """
 
-def sub_sampling(input_ids, attention_mask, scores, labels, num_pos, num_neg, mode="bottom"):
+def sub_sampling(mode, num_pos, num_neg, ratio, input_ids, attention_mask, scores, labels):
     """
     Args:
-        input_ids: [batch_size, n_candidate, seq_len]
-        attention_mask: [batch_size, n_candidate, seq_len]
-        scores: [batch_size, n_candidate, n_task]
-        labels: [batch_size, n_candidate, n_task]
-        num_pos: int
-        num_neg: int
-        mode: str, "bottom" or "random"
+        mode: sub sampling mode
+        num_pos: number of positive samples
+        num_neg: number of negative samples
+        ratio: ratio of positive samples
+        input_ids: [batch_size, n_pairs, seq_len]
+        attention_mask: [batch_size, n_pairs, seq_len]
+        scores: [batch_size, n_pairs, n_task]
+        labels: [batch_size, n_pairs, n_task]
+
     """
     batch_size, n_candidate, seq_len = input_ids.shape
-    selected_idx = []
-    for i in range(batch_size):
-        idx = np.arange(n_candidate)
-        # remove duplicate candidates, cpu
-        unique_idx = []
-        unique_scores = []
-        for j, score in enumerate(torch.sum(scores[i], dim=-1)):
-            if score not in unique_scores:
-                unique_idx.append(idx[j])
-                unique_scores.append(score.item())
-        unique_idx = np.array(unique_idx)
-        unique_scores = np.array(unique_scores)
-        # only select a few pos and neg candidates
-        sorted_idx = np.argsort(unique_scores)[::-1]
-        pos_idx = sorted_idx[:num_pos]
-        if mode == "bottom":
-            neg_idx = sorted_idx[-num_neg:]
-        elif mode == "random":
-            neg_idx = np.random.choice(sorted_idx[num_pos:], num_neg, replace=False)
-        else:
-            raise NotImplementedError
-        idx = np.concatenate([pos_idx, neg_idx])
-        np.random.shuffle(idx)
-        idx = unique_idx[idx]
-        selected_idx.append(idx)
-    selected_idx = torch.tensor(selected_idx).to(input_ids.device)
+
+    if mode == "uniform":
+        sorted_idx = torch.argsort(torch.sum(scores, dim=-1), dim=1, descending=True)
+        step = torch.tensor(n_candidate / (n_candidate * ratio), dtype=torch.long).to(input_ids.device)
+        selected_idx = sorted_idx[:, ::step]
+        shuffled_idx = torch.randperm(selected_idx.shape[1]).to(input_ids.device)
+        selected_idx = selected_idx[:, shuffled_idx]
+    elif mode in ["top_bottom", "top_random", "random_bottom"]:
+        selected_idx = []
+        for i in range(batch_size):
+            idx = np.arange(n_candidate)
+            # remove duplicate candidates, cpu
+            unique_idx = []
+            unique_scores = []
+            for j, score in enumerate(torch.sum(scores[i], dim=-1)):
+                if score not in unique_scores:
+                    unique_idx.append(idx[j])
+                    unique_scores.append(score.item())
+            unique_idx = np.array(unique_idx)
+            unique_scores = np.array(unique_scores)
+            # only select a few pos and neg candidates
+            sorted_idx = np.argsort(unique_scores)[::-1]
+
+            if mode == "top_bottom":
+                pos_idx = sorted_idx[:num_pos] # top
+                neg_idx = sorted_idx[-num_neg:] # bottom
+            elif mode == "top_random":
+                pos_idx = sorted_idx[:num_pos] # top
+                neg_idx = np.random.choice(sorted_idx[num_pos:], num_neg, replace=False) # random
+            elif mode == "random_bottom":
+                pos_idx = np.random.choice(sorted_idx[:-num_neg], num_pos, replace=False) # random
+                neg_idx = sorted_idx[-num_neg:] # bottom
+            else:
+                raise NotImplementedError
+            idx = np.concatenate([pos_idx, neg_idx])
+            np.random.shuffle(idx)
+            idx = unique_idx[idx]
+            selected_idx.append(idx)
+        selected_idx = torch.tensor(selected_idx).to(input_ids.device)
+    elif mode == "importance":
+        selected_idx = importance_sampling(scores, ratio)
+    else:
+        raise NotImplementedError
     input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
     attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
     scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
     labels = labels[torch.arange(batch_size).unsqueeze(-1), selected_idx]
     return selected_idx, input_ids, attention_mask, scores, labels
+
+def importance_sampling(scores, ratio):
+    """
+    Args:
+        scores: [batch_size, n_pairs, n_task]
+        ratio: ratio of positive samples
+    """
+    pass
