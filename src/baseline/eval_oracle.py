@@ -13,7 +13,8 @@ from common.data import (
     save_pkl_cand_scores,
     get_candidate_types,
     get_candidate_metrics,
-    load_pkl_sources_and_targets
+    load_pkl_sources_and_targets,
+    load_prepared_dataset
 )
 from common.dataset import (
     CustomDataset,
@@ -58,6 +59,10 @@ def main(args):
         scores = overall_eval(candidates, targets, to_score_metrics, args.num_workers)
         for k, v in scores.items():
             save_pkl_cand_scores(args.dataset, args.set, generation_method, model_name, k, v)
+
+    ds = load_prepared_dataset(args.dataset, args.set)
+    ds.analyze_oracle()
+
 
 
 if __name__ == "__main__":

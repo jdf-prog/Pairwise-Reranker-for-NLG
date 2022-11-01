@@ -80,8 +80,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
             self.model.decoder,
             self.encoder.get_attention_mask_for_decoder
         )
-
-
     def unwrap_model(self):
         """
         Unwrap the model's encoder, decoder
@@ -107,7 +105,6 @@ class DualFiDBART(transformers.BartForConditionalGeneration):
         """
         x, aux_loss = self.encoder.get_multi_task_layer_output()
         return regression_BCE_loss(x, aux_loss, scores)
-
 
     def prepare_inputs_for_generation(
         self,

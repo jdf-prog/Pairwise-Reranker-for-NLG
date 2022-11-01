@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from gc import callbacks
 from sre_parse import State
 import time
 import os
@@ -33,9 +34,11 @@ from src.dualfid.model_util import (
     build_tokenizer
 )
 from src.dualfid.data import (
-    get_data_collator_class,
     load_data,
     Dataset
+)
+from src.dualfid.collator import (
+    get_data_collator_class
 )
 from src.dualfid.trainer import (
     RerankerTrainer,
@@ -72,6 +75,7 @@ def main(args):
 
     # set up data collator
     data_collator_class = get_data_collator_class(args.reranker_type)
+    print(data_collator_class)
     data_collator = data_collator_class(args.source_maxlength, tokenizer, args.candidate_maxlength)
 
     if args.do_train:
@@ -80,8 +84,18 @@ def main(args):
         args.n_tasks = train_dataset.n_tasks
 
     # set up model
+    config = {
+            "n_tasks": args.n_tasks,
+            "num_pos": args.num_pos,
+            "num_neg": args.num_neg,
+            "sub_sampling_ratio": args.sub_sampling_ratio,
+            "sub_sampling_mode": args.sub_sampling_mode,
+            "loss_type": args.loss_type,
+            "localize": args.localize,
+            "localize_ratio": args.localize_ratio,
+        }
     if args.load_checkpoint:
-        config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
+        # config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
         model = build_reranker(
             args.reranker_type,
             args.model_type,
@@ -103,8 +117,8 @@ def main(args):
             "sub_sampling_ratio": args.sub_sampling_ratio,
             "sub_sampling_mode": args.sub_sampling_mode,
             "loss_type": args.loss_type,
-            "top_k_permutation": args.top_k_permutation,
-
+            "localize": args.localize,
+            "localize_ratio": args.localize_ratio,
         }
         model = build_reranker(
             args.reranker_type,
@@ -178,9 +192,7 @@ def main(args):
             wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
             wandb.config.update(args)
         logging.info("Start training")
-        outputs = trainer.train(
-            resume_from_checkpoint=args.load_checkpoint,
-        )
+        outputs = trainer.train()
         logging.info("Training finished")
         global_step, training_loss = outputs.global_step, outputs.training_loss
         metrics = outputs.metrics
@@ -218,7 +230,7 @@ if __name__ == "__main__":
 
     # model config
     parser.add_argument("--reranker_type", type=str, choices=[
-        "scr", "dual", "listwise", "pairwise", "pairwise_gen"
+        "scr", "dual", "crosscompare", "dualcompare", "comparegen"
     ], default="sc")
     parser.add_argument("--model_type", type=str, choices=[
         "roberta", "bert", "t5"
@@ -227,9 +239,11 @@ if __name__ == "__main__":
     parser.add_argument("--load_checkpoint", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
-      "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE"
+      "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
+      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE"
     ], default="BCE")
-    parser.add_argument("--top_k_permutation", type=int, default=1)
+    parser.add_argument("--localize", type=str2bool, default=False)
+    parser.add_argument("--localize_ratio", type=float, default=0.4)
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
@@ -242,7 +256,7 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance"
+        "importance", "random"
     ], default="top_bottom")
 
     # running config
@@ -320,6 +334,5 @@ if __name__ == "__main__":
 
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
-
+    logging.info("args: %s", args)
     main(args)
-

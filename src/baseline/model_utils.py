@@ -1,7 +1,8 @@
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration, \
     PegasusTokenizer, PegasusForConditionalGeneration, \
-    BartTokenizerFast, BartForConditionalGeneration
+    BartTokenizerFast, BartForConditionalGeneration, \
+    AutoModelForSeq2SeqLM, AutoTokenizer
 
 import torch
 import torch.nn as nn
@@ -17,6 +18,9 @@ def build_tokenizer(args):
     elif args.model_type.startswith("bart"):
         print("\nUsing Bart tokenizer")
         tokenizer = BartTokenizerFast.from_pretrained(args.model, cache_dir = args.cache_dir)
+    elif args.model_type.startswith("opus-mt"):
+        print("\nUsing OPUS MT tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir = args.cache_dir)
 
     return tokenizer
 
@@ -32,6 +36,9 @@ def build_model(args):
     elif args.model_type.startswith("bart"):
         print("\nUsing Bart model")
         model = BartForConditionalGeneration.from_pretrained(args.model, cache_dir = args.cache_dir)
+    elif args.model_type.startswith("opus-mt"):
+        print("\nUsing OPUS MT model")
+        model = AutoModelForSeq2SeqLM.from_pretrained(args.model, cache_dir = args.cache_dir)
 
     return model
 

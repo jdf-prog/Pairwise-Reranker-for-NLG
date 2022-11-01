@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --time=2:00:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=bash
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 
 python eval_oracle.py \
-    --dataset cnndm \
+    --dataset wmt18 \
     --set test \
-    --eval_rouge True \
+    --eval_rouge False \
     --eval_bleu True \
-    --num_workers 4 \
+    --num_workers 1 \

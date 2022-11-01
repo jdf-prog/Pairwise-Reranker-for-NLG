@@ -1,7 +1,9 @@
+from numpy import product
 import torch
 import os
 import os
 import torch
+import itertools
 
 from pathlib import Path
 from common.dataset import CustomDataset
@@ -124,19 +126,44 @@ def save_pkl_sources_and_targets(dataset_name, set_name, sources, targets):
     assert len(sources) == len(targets)
     print("Saved the data to pkl files!")
 
-def load_prepared_dataset(dataset_name, set_name) -> CustomDataset:
+def load_prepared_dataset(dataset_name, set_name, models:list=None, generation_methods:list=None, metrics:list=None) -> CustomDataset:
     """
         Load the computed and prepared dataset
         Note that the data path is hard-coded here!
     """
-    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
-    ds_path = cur_folder.parent.parent / 'data' / 'prepared' / dataset_name / set_name / 'dataset.jsonl'
-    if not ds_path.exists():
-        sources, targets = load_pkl_sources_and_targets(dataset_name, set_name)
-        ds = CustomDataset.from_raw(sources, targets)
-    else:
-        ds = CustomDataset.from_jsonl(ds_path)
+    cur_types = get_candidate_types(dataset_name, set_name)
+    sources, targets = load_pkl_sources_and_targets(dataset_name, set_name)
+    ds = CustomDataset.from_raw(sources, targets)
+
+    if models == None:
+        models = list(set([t[0] for t in cur_types]))
+    if generation_methods == None:
+        generation_methods = list(set([t[1] for t in cur_types]))
+    for model, generation_method in itertools.product(models, generation_methods):
+        assert (model, generation_method) in cur_types, f"{model} {generation_method} not in {cur_types}"
+        cur_metrics = get_candidate_metrics(dataset_name, set_name, model, generation_method)
+        candidates = load_pkl_candidates(dataset_name, set_name, generation_method, model)
+        scores = {}
+        if metrics == None:
+            to_load_metrics = cur_metrics
+        else:
+            to_load_metrics = metrics
+        for metric in to_load_metrics:
+            assert metric in cur_metrics, f"{metric} not in {cur_metrics}"
+            cand_scores = load_pkl_cand_scores(dataset_name, set_name, generation_method, model, metric)
+            scores[metric] = cand_scores
+        ds.add_candidates(model, generation_method, candidates, scores)
+    ds.self_check()
     return ds
+
+    # cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    # ds_path = cur_folder.parent.parent / 'data' / 'prepared' / dataset_name / set_name / 'dataset.jsonl'
+    # if not ds_path.exists():
+    #     sources, targets = load_pkl_sources_and_targets(dataset_name, set_name)
+    #     ds = CustomDataset.from_raw(sources, targets)
+    # else:
+    #     ds = CustomDataset.from_jsonl(ds_path)
+    # return ds
 
 def save_prepared_dataset(dataset_name, set_name, dataset: CustomDataset):
     """

@@ -6,14 +6,16 @@ from dualfid.data import Dataset
 from transformers import TrainingArguments, Trainer, WEIGHTS_NAME, CONFIG_NAME
 from dualfid.reranker import (
     SCR,
-    T5SCR,
-    DualReranker
+    DualReranker,
+    CrossCompareReranker,
+    CompareGenReranker,
 )
 from transformers import (
     RobertaModel,
     BertModel,
     T5ForConditionalGeneration
 )
+from transformers.models.roberta.modeling_roberta import RobertaModel
 def regression_BCE_loss(x, aux_loss, scores):
 
     scores = scores.to(x.device)
@@ -74,10 +76,12 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
     pretrained_model = build_pretrained_model(model_type, model_name, cache_dir)
 
     if reranker_type == "scr":
-        if model_type.startswith("t5"):
-            reranker = T5SCR(pretrained_model, config)
-        else:
-            reranker = SCR(pretrained_model, config)
+        reranker = SCR(pretrained_model, config)
     elif reranker_type == "dual":
         reranker = DualReranker(pretrained_model, config)
+    elif reranker_type == "crosscompare":
+        reranker = CrossCompareReranker(pretrained_model, config)
+    elif reranker_type == "comparegen":
+        reranker = CompareGenReranker(pretrained_model, config)
+
     return reranker

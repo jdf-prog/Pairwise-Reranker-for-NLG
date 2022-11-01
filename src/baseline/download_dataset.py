@@ -26,11 +26,13 @@ parser.add_argument('--seed', type = int, default = 42)
 
 # data
 parser.add_argument('--dataset', type=str, default = "reddit",
-                    choices= ["cnndm", "xsum", "reddit"])
+                    choices= ["cnndm", "xsum", "reddit", 'wmt18'])
+
+parser.add_argument('--max_size', type = int, default = 1000000)
 
 args = parser.parse_args()
 
-dataset_keys = ["cnndm", "xsum", "reddit", 'wmt']
+dataset_keys = ["cnndm", "xsum", "reddit", 'wmt18']
 dataset_names = ["cnn_dailymail", "xsum", "reddit_tifu", "wmt18"]
 make_splits = [False, False, True, False]
 data_versions = ["3.0.0", None, "long", "zh-en"]
@@ -61,9 +63,13 @@ def main(args):
 
     if args.make_split:
         dataset = dataset["train"]
-
-        sources = [x[args.source_key] for x in dataset]
-        target = [x[args.target_key] for x in dataset]
+        if 'wmt' in args.dataset:
+            slang, tlang = args.data_version.split('-')
+            sources = [d[slang] for d in dataset['translation'][:args.max_size]]
+            targets = [d[tlang] for d in dataset['translation'][:args.max_size]]
+        else:
+            sources = [x[args.source_key] for x in dataset[:args.max_size]]
+            target = [x[args.target_key] for x in dataset[:args.max_size]]
 
         idx = np.random.permutation(len(sources))
         sources = [sources[i] for i in idx]
@@ -94,9 +100,14 @@ def main(args):
         for x in sets:
             (set, set_name) = x
             dataset_set = dataset[set]
-            sources = [x[args.source_key] for x in dataset_set]
-            target = [x[args.target_key] for x in dataset_set]
-            save_raw_dataset(args.dataset, set_name, sources, target)
+            if 'wmt' in args.dataset:
+                slang, tlang = args.data_version.split('-')
+                sources = [d[slang] for d in dataset_set['translation'][:args.max_size]]
+                targets = [d[tlang] for d in dataset_set['translation'][:args.max_size]]
+            else:
+                sources = [x[args.source_key] for x in dataset_set[:args.max_size]]
+                targets = [x[args.target_key] for x in dataset_set[:args.max_size]]
+            save_raw_dataset(args.dataset, set_name, sources, targets)
 
 def seed_everything(seed=42):
     random.seed(seed)

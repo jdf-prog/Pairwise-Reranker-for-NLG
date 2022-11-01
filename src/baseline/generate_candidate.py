@@ -42,11 +42,11 @@ parser.add_argument('--debug_size', type = int, default = 10)
 
 # data
 parser.add_argument('--dataset', type=str, default = "reddit",
-                    choices= ["cnndm", "xsum", "reddit"])
+                    choices= ["cnndm", "xsum", "reddit", 'wmt18'])
 
 # model
 parser.add_argument('--model_type', type = str, default = "pegasus",
-                    choices=["pegasus", "bart"])
+                    choices=["pegasus", "bart", "opus-mt"])
 parser.add_argument('--model', type = str, default = "google/pegasus-large",
                     choices = ["google/pegasus-large", "google/pegasus-cnn_dailymail", "google/pegasus-xsum",
                     "facebook/bart-large", "facebook/bart-large-cnn", "facebook/bart-large-xsum",
@@ -69,7 +69,7 @@ parser.add_argument('--load_model_path', type = str,
 # summary generation
 parser.add_argument('--set', type=str, default = "val",
                     choices = ["train", "first_half_train_shuffled", "second_half_train_shuffled", "val", "test"])
-parser.add_argument('--max_val_size', type = int, default = 100000)
+parser.add_argument('--max_val_size', type = int, default = 50000)
 parser.add_argument('--inference_bs', type = int, default = 2)
 parser.add_argument('--save_candidates', type = str2bool, default = True)
 parser.add_argument('--generation_method', type = str, default = "diverse_beam_search",
@@ -84,16 +84,16 @@ parser.add_argument('--stemmer', type = str2bool, default = True)
 
 args = parser.parse_args()
 
-dataset_names = ["cnndm", "xsum", "reddit", ]
-val_data_sizes = [13368, 11332, 4213]
-test_data_sizes = [11490, 11334, 4222]
-source_max_lengths = [1024, 512, 512] # debug
-candidate_max_lengths = [128, 64, 128]
-clean_ns = [True, False, False]
-length_penalties_pegasus = [0.8, 0.8, 0.6]
-length_penalties_bart = [0.8, 0.8, 1.0]
-repetition_penalties = [1.0, 1.0, 1.0]
-no_repeat_ngram_sizes = [0, 3, 3]
+dataset_names = ["cnndm", "xsum", "reddit", 'wmt18']
+val_data_sizes = [13368, 11332, 4213, 2001]
+test_data_sizes = [11490, 11334, 4222, 3981]
+source_max_lengths = [1024, 512, 512, 512] # debug
+candidate_max_lengths = [128, 64, 128, 350]
+clean_ns = [True, False, False, False]
+length_penalties_pegasus = [0.8, 0.8, 0.6, 0.8]
+length_penalties_bart = [0.8, 0.8, 1.0, 0.8]
+repetition_penalties = [1.0, 1.0, 1.0, 1.0]
+no_repeat_ngram_sizes = [0, 3, 3, 0]
 
 idx = dataset_names.index(args.dataset)
 
@@ -104,6 +104,8 @@ if args.model_type == "pegasus":
     args.length_penalty = length_penalties_pegasus[idx]
 elif args.model_type == "bart":
     args.length_penalty = length_penalties_bart[idx]
+elif args.model_type == "opus-mt":
+    args.length_penalty = 1.0
 args.repetition_penalty = repetition_penalties[idx]
 args.no_repeat_ngram_size = no_repeat_ngram_sizes[idx]
 args.cache_dir = "../../hf_models/" + args.model.split('/')[-1] + "/"
