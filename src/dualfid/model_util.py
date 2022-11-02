@@ -9,6 +9,7 @@ from dualfid.reranker import (
     DualReranker,
     CrossCompareReranker,
     CompareGenReranker,
+    DualCompareReranker
 )
 from transformers import (
     RobertaModel,
@@ -81,6 +82,8 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
         reranker = DualReranker(pretrained_model, config)
     elif reranker_type == "crosscompare":
         reranker = CrossCompareReranker(pretrained_model, config)
+    elif reranker_type == "dualcompare":
+        reranker = DualCompareReranker(pretrained_model, config)
     elif reranker_type == "comparegen":
         reranker = CompareGenReranker(pretrained_model, config)
 

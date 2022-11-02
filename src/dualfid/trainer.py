@@ -109,8 +109,8 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
         cur_idx = select_process[:, 0, i]
         next_idx = select_process[:, 1, i]
         pred_better_idx = select_process[:, 2, i]
-        print(cur_idx)
-        print(next_idx)
+        # print(cur_idx)
+        # print(next_idx)
         cur_scores = sum_scores[np.arange(batch_size), cur_idx]
         next_scores = sum_scores[np.arange(batch_size), next_idx]
         pred_better_scores = sum_scores[np.arange(batch_size), pred_better_idx]

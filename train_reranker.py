@@ -305,7 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--logging_steps", type=int, default=5)
     parser.add_argument("--log_level", type=str, default="passive",
         choices=["passive", "info", "debug", "warning", "error", "critical"])
-    parser.add_argument("--report_to", type=str, default=None)
+    parser.add_argument("--report_to", type=str, default="wandb")
     parser.add_argument("--run_name", type=str, default="basic") # wandb run name
 
 
@@ -324,7 +324,6 @@ if __name__ == "__main__":
     # init args
     args = parser.parse_args()
     args.load_best_model_at_end = args.do_train and args.do_predict
-    args.run_name = f"{args.run_name}_{args.loss_type}"
     # set up default output dir
     if args.output_dir is None:
         args.output_dir = f"outputs/{args.reranker_type}/{args.model_name}/{args.run_name}"

@@ -1,9 +1,8 @@
 #!/bin/bash
-#SBATCH --time=36:00:00
+#SBATCH --time=24:00:00
 #SBATCH --job-name=train_reranker
-
 #SBATCH --output ./jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:6000:1
 #SBATCH -n 1
 
 train_data_path="./data/prepared/cnndm/val/dataset_train.jsonl"
@@ -119,7 +118,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_mse" \
+    --run_name "debug_7_pos_7_neg_cls_sep_sep" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -133,16 +132,48 @@ train_reranker.py \
     --gradient_accumulation_steps 16 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
-    --sub_sampling_mode "random" \
-    --sub_sampling_ratio 0.5 \
+    --num_pos 7 \
+    --num_neg 7 \
     --evaluation_strategy "steps" \
     --save_strategy "steps" \
     --eval_steps 100 \
     --save_steps 100 \
-    --evaluate_first_step True \
-    --load_checkpoint "./outputs/crosscompare/roberta-large/debug_mse_BCE/checkpoint-100" \
+    # --evaluate_first_step True \
+    # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_mean_BCE/checkpoint-100" \
 
 
+
+# torchrun \
+#     --rdzv_backend=c10d \
+#     --rdzv_endpoint="localhost:${localhost}" \
+#     --nnodes 1 \
+#     --nproc_per_node 1 \
+# train_reranker.py \
+#     --reranker_type "dualcompare" \
+#     --model_type "roberta" \
+#     --model_name "roberta-large" \
+#     --run_name "debug_1_pos_1_neg_mean" \
+#     --train_data_path ${train_data_path} \
+#     --eval_data_path ${dev_data_path} \
+#     --test_data_path ${test_data_path} \
+#     --n_candidate 30 \
+#     --candidate_model "pegasus_cnndm" \
+#     --candidate_generation_method "diverse_beam_search+beam_search" \
+#     --source_maxlength 256 \
+#     --candidate_maxlength 128 \
+#     --per_device_train_batch_size 1 \
+#     --per_device_eval_batch_size 8 \
+#     --gradient_accumulation_steps 16 \
+#     --num_train_epochs 5 \
+#     --overwrite_output_dir True \
+#     --num_pos 1 \
+#     --num_neg 1 \
+#     --evaluation_strategy "steps" \
+#     --save_strategy "steps" \
+#     --eval_steps 100 \
+#     --save_steps 100 \
+#     # --evaluate_first_step True \
+#     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_mean_BCE/checkpoint-100" \
 
 
 

@@ -206,6 +206,74 @@ class CrossCompareCollator(object):
             "cand_target_dif_scores" : batch_cand_target_dif_scores,
         }
 
+class DualCompareCollator(object):
+    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+        self.tokenizer = tokenizer
+        self.source_maxlength = source_maxlength
+        self.candidate_maxlength = candidate_maxlength
+
+        self.sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else tokenizer.eos_token
+        self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
+        assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
+        self.separate_token = self.sep_token
+        self.postfix = postfix
+        self.target_maxlength = self.candidate_maxlength
+
+
+    def __call__(self, batch):
+        batch_size = len(batch)
+        batch_source = [b['source'] for b in batch]
+        batch_target = [b['target'] for b in batch]
+        batch_candidates = [b['candidates'] for b in batch]
+        batch_scores = [b['scores'] for b in batch]
+        batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
+        batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
+        n_candidate = len(batch_candidates[0])
+
+        batch_candidate_pairs = [[[None for _ in range(n_candidate)] for _ in range(n_candidate)] for _ in range(batch_size)]
+        batch_cand_target_pairs = [[None for _ in range(n_candidate)] for _ in range(batch_size)]
+
+        target_rand_mat = torch.rand(batch_size, n_candidate) > 0.5
+        scores = torch.stack(batch_scores, dim=0)
+        batch_cand_target_dif_scores = torch.where(target_rand_mat.unsqueeze(-1), scores - 1.0, 1.0 - scores)
+
+        for bz in range(batch_size):
+            n_candidate = len(batch_candidates[bz])
+            for i in range(n_candidate):
+                for j in range(n_candidate):
+                    if self.postfix is not None:
+                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([batch_candidates[bz][i], batch_candidates[bz][j], self.postfix])
+                    else:
+                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([batch_candidates[bz][i], batch_candidates[bz][j]])
+                if target_rand_mat[bz][i]:
+                    batch_cand_target_pairs[bz][i] = self.separate_token.join([batch_candidates[bz][i], batch_target[bz]])
+                else:
+                    batch_cand_target_pairs[bz][i] = self.separate_token.join([batch_target[bz], batch_candidates[bz][i]])
+
+        encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.tokenizer.model_max_length) # source
+        encoded_cand_target_ids, encoded_cand_target_masks = encode_batch_text(batch_cand_target_pairs, self.tokenizer, self.tokenizer.model_max_length) # candidates
+        encoded_cand_pair_ids, encoded_cand_pair_masks = [], []
+        for bz in range(batch_size):
+            n_candidate = len(batch_candidates[bz])
+            ids, mask = encode_batch_text(batch_candidate_pairs[bz], self.tokenizer, self.tokenizer.model_max_length)
+            encoded_cand_pair_ids.append(ids)
+            encoded_cand_pair_masks.append(mask)
+        encoded_cand_pair_ids = torch.stack(encoded_cand_pair_ids, dim=0)
+        encoded_cand_pair_masks = torch.stack(encoded_cand_pair_masks, dim=0)
+
+
+        return {
+            'source_ids' : encoded_source_ids,
+            'source_attention_mask' : encoded_source_masks,
+            "candidate_pair_ids" : encoded_cand_pair_ids,
+            "candidate_pair_attention_mask" : encoded_cand_pair_masks,
+            "candidate_target_ids" : encoded_cand_target_ids,
+            "candidate_target_attention_mask" : encoded_cand_target_masks,
+            "scores" : scores,
+            "cand_target_dif_scores" : batch_cand_target_dif_scores,
+        }
+
+
 class CompareGenCollator(object):
     def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
         self.tokenizer = tokenizer
@@ -376,6 +444,8 @@ def get_data_collator_class(model_type:str):
         return DualCollator
     elif model_type == "crosscompare":
         return CrossCompareCollator
+    elif model_type == "dualcompare":
+        return DualCompareCollator
     elif model_type == "t5comparegen":
         return CompareGenCollator
     else:
