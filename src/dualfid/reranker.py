@@ -431,46 +431,40 @@ class CrossCompareReranker(nn.Module):
         candidate_encs_idx = candidate_encs_idx.nonzero()[:, 1].reshape(-1, 3)
         encs = outputs.last_hidden_state
 
-        # source_encs = []
-        # cand1_encs = []
-        # cand2_encs = []
-        # random = torch.randint(0, 100, (1,)).item()
-        # for i in range(encs.shape[0]):
-        #     source_encs.append(encs[i, 1:candidate_encs_idx[i, 0]].mean(0))
-        #     # compute per token weight
-        #     cand1_enc = encs[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand1_len, hidden_size]
-        #     cand2_enc = encs[i, candidate_encs_idx[i, 1]+1:candidate_encs_idx[i, 2]] # [cand2_len, hidden_size]
-        #     sim_mat = torch.einsum("ij,kj->ik", F.normalize(cand1_enc, dim=-1), F.normalize(cand2_enc, dim=-1)) # [cand1_len, cand2_len]
-        #     cand1_weight = (1-(sim_mat).max(1)[0])
-        #     cand2_weight = (1-(sim_mat).max(0)[0])
-        #     cand1_weight = cand1_weight / cand1_weight.sum()
-        #     cand2_weight = cand2_weight / cand2_weight.sum()
-        #     # print(torch.var(cand1_weight), torch.var(cand2_weight))
-        #     # print(cand1_weight.tolist(), cand2_weight.tolist())
-        #     output_heatmap = False # debug
-        #     if output_heatmap:
-        #         cand1_ids = input_ids[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand1_len]
-        #         cand2_ids = input_ids[i, candidate_encs_idx[i, 1]+1:candidate_encs_idx[i, 2]] # [cand2_len]
-        #         cand1_tokens = self.tokenizer.convert_ids_to_tokens(cand1_ids.tolist())
-        #         cand2_tokens = self.tokenizer.convert_ids_to_tokens(cand2_ids.tolist())
-        #         cand1_text = self.tokenizer.decode(cand1_ids.tolist())
-        #         cand2_text = self.tokenizer.decode(cand2_ids.tolist())
-        #         sim_mat_numpy = sim_mat.detach().cpu().numpy().round(3)
-        #         df = pd.DataFrame(sim_mat_numpy, index=cand1_tokens, columns=cand2_tokens)
-        #         plt.figure(figsize=(len(cand2_tokens)*0.75, len(cand1_tokens)*0.75), dpi=100)
-        #         plt.title(f"{cand1_text}\n{cand2_text}")
-        #         sns.heatmap(df, annot=True, fmt=".3f", cmap="Blues").get_figure().savefig(f"./pics/sim_mat_{i}_{random}.png")
-        #     # cand1_encs.append((cand1_enc * cand1_weight.unsqueeze(1)).sum(0))
-        #     # cand2_encs.append((cand2_enc * cand2_weight.unsqueeze(1)).sum(0))
-        #     cand1_encs.append(cand1_enc.mean(0)) # debug
-        #     cand2_encs.append(cand2_enc.mean(0)) # debug
-        # source_encs = torch.stack(source_encs, dim=0)
-        # cand1_encs = torch.stack(cand1_encs, dim=0)
-        # cand2_encs = torch.stack(cand2_encs, dim=0)
-
-        source_encs = encs[torch.arange(encs.shape[0]), candidate_encs_idx[:, 0]-1] # CLS
-        cand1_encs = encs[torch.arange(encs.shape[0]), candidate_encs_idx[:,1]-1] # SEP
-        cand2_encs = encs[torch.arange(encs.shape[0]), candidate_encs_idx[:,2]-1] # SEP
+        source_encs = []
+        cand1_encs = []
+        cand2_encs = []
+        random = torch.randint(0, 100, (1,)).item()
+        for i in range(encs.shape[0]):
+            source_encs.append(encs[i, 1:candidate_encs_idx[i, 0]].mean(0))
+            # compute per token weight
+            cand1_enc = encs[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand1_len, hidden_size]
+            cand2_enc = encs[i, candidate_encs_idx[i, 1]+1:candidate_encs_idx[i, 2]] # [cand2_len, hidden_size]
+            sim_mat = torch.einsum("ij,kj->ik", F.normalize(cand1_enc, dim=-1), F.normalize(cand2_enc, dim=-1)) # [cand1_len, cand2_len]
+            cand1_weight = (1-(sim_mat).max(1)[0])
+            cand2_weight = (1-(sim_mat).max(0)[0])
+            cand1_weight = cand1_weight / cand1_weight.sum()
+            cand2_weight = cand2_weight / cand2_weight.sum()
+            output_heatmap = False # debug
+            if output_heatmap:
+                cand1_ids = input_ids[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand1_len]
+                cand2_ids = input_ids[i, candidate_encs_idx[i, 1]+1:candidate_encs_idx[i, 2]] # [cand2_len]
+                cand1_tokens = self.tokenizer.convert_ids_to_tokens(cand1_ids.tolist())
+                cand2_tokens = self.tokenizer.convert_ids_to_tokens(cand2_ids.tolist())
+                cand1_text = self.tokenizer.decode(cand1_ids.tolist())
+                cand2_text = self.tokenizer.decode(cand2_ids.tolist())
+                sim_mat_numpy = sim_mat.detach().cpu().numpy().round(3)
+                df = pd.DataFrame(sim_mat_numpy, index=cand1_tokens, columns=cand2_tokens)
+                plt.figure(figsize=(len(cand2_tokens)*0.75, len(cand1_tokens)*0.75), dpi=100)
+                plt.title(f"{cand1_text}\n{cand2_text}")
+                sns.heatmap(df, annot=True, fmt=".3f", cmap="Blues").get_figure().savefig(f"./pics/sim_mat_{i}_{random}.png")
+            # cand1_encs.append((cand1_enc * cand1_weight.unsqueeze(1)).sum(0))
+            # cand2_encs.append((cand2_enc * cand2_weight.unsqueeze(1)).sum(0))
+            cand1_encs.append(cand1_enc.mean(0)) # debug
+            cand2_encs.append(cand2_enc.mean(0)) # debug
+        source_encs = torch.stack(source_encs, dim=0)
+        cand1_encs = torch.stack(cand1_encs, dim=0)
+        cand2_encs = torch.stack(cand2_encs, dim=0)
 
         left_sim = F.cosine_similarity(source_encs, cand1_encs)
         right_sim = F.cosine_similarity(source_encs, cand2_encs)
@@ -555,7 +549,6 @@ class CrossCompareReranker(nn.Module):
                 left_sim, right_sim = self._forward(
                     to_model_ids, to_model_attention_mask,
                 ) # [batch_size]
-
                 # compute accuracy
                 better_idx = torch.where(left_sim >= right_sim, cur_idx, next_idx)
                 better_idxs.append(better_idx)
@@ -605,7 +598,35 @@ class DualCompareReranker(nn.Module):
         from transformers import RobertaTokenizerFast
         self.tokenizer = RobertaTokenizerFast.from_pretrained("roberta-large") # debug
 
-    def _forward(
+    def _encode_source(self, source_ids, source_attention_mask):
+        """
+            Encode source text
+        Args:
+            source_ids: [batch_size, source_len]
+            source_attention_mask: [batch_size, source_len]
+        Returns:
+
+        """
+        batch_size, source_len = source_ids.shape
+        last_hidden_states = self.source_encoder(
+            input_ids=source_ids,
+            attention_mask=source_attention_mask,
+            output_hidden_states=True,
+        ).last_hidden_state # [batch_size, source_len, hidden_size]
+        source_sep_idx = (source_ids == self.tokenizer.sep_token_id)
+        assert all(source_sep_idx.sum(1) == 1), source_sep_idx.sum(1)
+        source_sep_idx = source_sep_idx.nonzero()[:, 1] # [batch_size]
+
+        # mean pooling
+        source_encs = []
+        for i in range(batch_size):
+            source_token_encs = last_hidden_states[i, 1:source_sep_idx[i], :] # [source_len, hidden_size]
+            source_enc = torch.mean(source_token_encs, dim=0) # [hidden_size]
+            source_encs.append(source_enc)
+        source_encs = torch.stack(source_encs, dim=0) # [batch_size, hidden_size]
+        return source_encs
+
+    def _encode_candidates(
         self,
         candidate_pair_ids,
         candidate_pair_attention_mask,
@@ -648,8 +669,6 @@ class DualCompareReranker(nn.Module):
             cand2_weight = (1-(sim_mat).max(0)[0])
             cand1_weight = cand1_weight / cand1_weight.sum()
             cand2_weight = cand2_weight / cand2_weight.sum()
-            # print(torch.var(cand1_weight), torch.var(cand2_weight))
-            # print(cand1_weight.tolist(), cand2_weight.tolist())
             output_heatmap = False # debug
             if output_heatmap:
                 cand1_ids = candidate_pair_ids[i, 1:candidate_encs_idx[i, 0]] # [cand1_len]
@@ -667,12 +686,9 @@ class DualCompareReranker(nn.Module):
             # cand2_encs.append((cand2_enc * cand2_weight.unsqueeze(1)).sum(0))
             cand1_encs.append(cand1_enc.mean(0)) # debug
             cand2_encs.append(cand2_enc.mean(0)) # debug
+
         cand1_encs = torch.stack(cand1_encs, dim=0)
         cand2_encs = torch.stack(cand2_encs, dim=0)
-        # # compute candidate encs using cls and sep, turned out to be extremely not good
-        # cand1_encs = encs[torch.arange(batch_size * n_pair).unsqueeze(1), candidate_encs_idx[:, 0].unsqueeze(1), :] # [batch_size * n_pair, hidden_size]
-        # cand2_encs = encs[torch.arange(batch_size * n_pair).unsqueeze(1), candidate_encs_idx[:, 1].unsqueeze(1), :] # [batch_size * n_pair, hidden_size]
-
         cand1_encs = cand1_encs.view(*original_shape, -1) # [batch_size, n_pair, hidden_size]
         cand2_encs = cand2_encs.view(*original_shape, -1) # [batch_size, n_pair, hidden_size]
         return cand1_encs, cand2_encs
@@ -722,16 +738,9 @@ class DualCompareReranker(nn.Module):
             left_labels = (dif_scores > 0).float()
             right_labels = (dif_scores < 0).float()
 
-            outputs = self.source_encoder(
-                input_ids=source_ids,
-                attention_mask=source_attention_mask,
-                output_hidden_states=True,
-            )
-            source_encs = outputs.last_hidden_state[:, 0, :] # [batch_size, hidden_size]
-            cand1_encs, cand2_encs = self._forward(
-                candidate_pair_ids,
-                candidate_pair_attention_mask,
-            )
+            source_encs = self._encode_source(source_ids, source_attention_mask) # [batch_size, hidden_size]
+            cand1_encs, cand2_encs = self._encode_candidates(candidate_pair_ids, candidate_pair_attention_mask) # [batch_size, n_pair, hidden_size]
+
             # commpute similarity
             expanded_source_encs = source_encs.unsqueeze(1).expand(-1, n_pair, -1).reshape(batch_size * n_pair, -1) # [batch_size * n_pair, hidden_size]
             left_sim = F.cosine_similarity(expanded_source_encs, cand1_encs, dim=-1).view(batch_size, n_pair) # [batch_size, n_pair]
@@ -750,18 +759,11 @@ class DualCompareReranker(nn.Module):
             scores = torch.mean(scores, dim=-1) # [batch_size, n_candidate]
             permu = torch.randperm(n_candidate).repeat(batch_size, 1).to(device) # [batch_size, n_candidate]
             cur_idx = permu[:, 0]
-            outputs = {
-                "loss": torch.tensor(0.0).to(device),
-            }
-            outputs = self.source_encoder(
-                input_ids=source_ids,
-                attention_mask=source_attention_mask,
-                output_hidden_states=True,
-            )
-            source_encs = outputs.last_hidden_state[:, 0, :] # [batch_size, hidden_size]
             initial_idx = cur_idx
             next_idxs = []
             better_idxs = []
+
+            source_encs = self._encode_source(source_ids, source_attention_mask) # [batch_size, hidden_size]
 
             for i in range(1, n_candidate):
                 next_idx = permu[:, i]
@@ -769,7 +771,7 @@ class DualCompareReranker(nn.Module):
                 to_model_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
                 to_model_ids = to_model_ids.view(batch_size, candidate_len)
                 to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
-                cand1_encs, cand2_encs = self._forward(
+                cand1_encs, cand2_encs = self._encode_candidates(
                     to_model_ids, to_model_attention_mask,
                 )
                 # commpute similarity
@@ -781,7 +783,9 @@ class DualCompareReranker(nn.Module):
                 better_idxs.append(better_idx)
                 next_idxs.append(next_idx)
                 cur_idx = better_idx
-            outputs['loss'] = torch.tensor(0.0).to(device)
+            outputs = {
+                "loss": torch.tensor(0.0, device=device),
+            }
             outputs["select_process"] = []
             outputs["select_process"].append(torch.stack([initial_idx] + better_idxs[:-1], dim=1))
             outputs["select_process"].append(torch.stack(next_idxs, dim=1))

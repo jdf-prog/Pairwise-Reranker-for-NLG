@@ -46,10 +46,6 @@ from src.dualfid.trainer import (
 
 def main(args):
     seed_everything(args.seed)
-    # set up logging
-    if args.log_level == "passive":
-        args.log_level = "info"
-    logging.basicConfig(level=args.log_level.upper())
 
     # set up device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -75,13 +71,14 @@ def main(args):
 
     # set up data collator
     data_collator_class = get_data_collator_class(args.reranker_type)
-    print(data_collator_class)
     data_collator = data_collator_class(args.source_maxlength, tokenizer, args.candidate_maxlength)
 
     if args.do_train:
         if args.do_eval:
             assert train_dataset.n_tasks == eval_dataset.n_tasks
         args.n_tasks = train_dataset.n_tasks
+    elif args.do_predict:
+        args.n_tasks = predict_dataset.n_tasks
 
     # set up model
     config = {
@@ -182,17 +179,25 @@ def main(args):
         compute_metrics=compute_metrics,
     )
 
-    if args.evaluate_first_step:
-        metrics = trainer.evaluate()
-        logging.info(f"Evaluate first step: \n{metrics}")
+
+
+
+
 
     if args.do_train:
         # set up wandb
         if args.report_to == "wandb":
             wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
             wandb.config.update(args)
+
+        if args.evaluate_first_step:
+            metrics = trainer.evaluate()
+            logging.info(f"Evaluate first step: \n{metrics}")
+
         logging.info("Start training")
-        outputs = trainer.train()
+        outputs = trainer.train(
+            resume_from_checkpoint=args.resume_from_checkpoint,
+        )
         logging.info("Training finished")
         global_step, training_loss = outputs.global_step, outputs.training_loss
         metrics = outputs.metrics
@@ -218,8 +223,10 @@ def main(args):
             if args.output_dir is None:
                 raise ValueError("output_dir must be set to save predictions")
             output_path = os.path.join(args.output_dir, "predictions.json")
-            with open(output_path, "w") as f:
+            with open(os.path.join(args.output_dir, "predictions.json"), "w") as f:
                 json.dump(predictions.tolist(), f)
+            with open(os.path.join(args.output_dir, "labels.json"), "w") as f:
+                json.dump(labels.tolist(), f)
             logging.info(f"predictions saved to {output_path}")
 
 
@@ -305,7 +312,7 @@ if __name__ == "__main__":
     parser.add_argument("--logging_steps", type=int, default=5)
     parser.add_argument("--log_level", type=str, default="passive",
         choices=["passive", "info", "debug", "warning", "error", "critical"])
-    parser.add_argument("--report_to", type=str, default="wandb")
+    parser.add_argument("--report_to", type=str, default=None)
     parser.add_argument("--run_name", type=str, default="basic") # wandb run name
 
 
@@ -319,6 +326,7 @@ if __name__ == "__main__":
 
     # metrics config
     parser.add_argument("--load_best_model_at_end", type=str2bool, default=True)
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--metric_for_best_model", type=str, default="dev_score")
 
     # init args
@@ -333,5 +341,10 @@ if __name__ == "__main__":
 
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
+
+    # set up logging
+    if args.log_level == "passive":
+        args.log_level = "info"
+    logging.basicConfig(level="INFO")
     logging.info("args: %s", args)
     main(args)
