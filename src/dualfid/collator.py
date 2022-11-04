@@ -433,20 +433,3 @@ class FiDCollator(object):
             "scores": scores,
         }
 
-def get_data_collator_class(model_type:str):
-    if model_type == "fid":
-        return FiDCollator
-    elif model_type == "dualfid":
-        return DualFiDCollator
-    elif model_type == "scr":
-        return SCRCollator
-    elif model_type == "dual":
-        return DualCollator
-    elif model_type == "crosscompare":
-        return CrossCompareCollator
-    elif model_type == "dualcompare":
-        return DualCompareCollator
-    elif model_type == "t5comparegen":
-        return CompareGenCollator
-    else:
-        raise ValueError(f"model_type {model_type} not supported")

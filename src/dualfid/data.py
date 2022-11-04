@@ -57,7 +57,7 @@ def load_data(data_path, args):
     examples = []
 
     for item in data:
-        # debug, sort the keys in the right order
+        # debug, only use rouge1, rouge2, rougeL
         for candidate in item['candidates']:
             candidate['scores'] = {
                 "rouge1": candidate['scores']['rouge1'],

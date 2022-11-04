@@ -4,12 +4,9 @@ import torch.nn as nn
 import numpy as np
 import os
 from transformers.trainer import Trainer
+from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers import EvalPrediction
 from typing import Dict, List, Optional, Tuple, Union, Any
-from common.evaluation import (
-    eval_rouge,
-    eval_bleu,
-)
 import wandb
 
 class RerankerTrainer(Trainer):
@@ -28,29 +25,41 @@ class RerankerTrainer(Trainer):
             model = self.model.module if hasattr(self.model, "module") else self.model
             torch.save(model.args, os.path.join(output_dir, "config.bin"))
 
-
-class FiDTrainer(Trainer):
+class FiDTrainer(Seq2SeqTrainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         """
         How the loss is computed by Trainer. By default, all models return the loss in the first element.
 
         Subclass and override for custom behavior.
         """
+        if self.label_smoother is not None and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
         outputs = model(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
-            labels=inputs['labels'],
+            labels=inputs["labels"],
         )
-        loss = outputs[0]
-        config = model.module.config if hasattr(model, "module") else model.config
-        if config.use_aux_loss:
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                _, aux_loss = model.module.compute_auxiliary_loss(inputs['scores'])
-            else:
-                _, aux_loss = model.compute_auxiliary_loss(inputs['scores'])
+
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            loss = self.label_smoother(outputs, labels)
         else:
-            aux_loss = 0
-        loss = loss + aux_loss
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+        if self.model.config.use_aux_loss:
+            if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                _, aux_loss = self.model.module.compute_auxiliary_loss(input["scores"])
+            else:
+                _, aux_loss = self.model.compute_auxiliary_loss(input["scores"])
+            loss += aux_loss
+
         return (loss, outputs) if return_outputs else loss
 
 # def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
@@ -141,3 +150,5 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
         "dev_score": np.mean(pred_best_scores[:, 1]), # dev score used for save checkpoint
     }
     return metrics
+
+

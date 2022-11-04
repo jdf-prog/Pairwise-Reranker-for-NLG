@@ -76,28 +76,28 @@ class FiDEncoderWrapper(torch.nn.Module):
             else:
                 self.aux_loss += aux_loss
 
-            if self.top_k_candidates is not None and self.top_k_candidates > 0:
-                top_k_indices = torch.topk(torch.sum(preds, dim=2), self.top_k_candidates, dim=1)[1] # [bsz, top_k_candidates]
+        if self.top_k_candidates is not None and self.top_k_candidates > 0:
+            top_k_indices = torch.topk(torch.sum(preds, dim=2), self.top_k_candidates, dim=1)[1] # [bsz, top_k_candidates]
 
-                last_hidden_states = outputs[0].reshape(bsz, self.n_ctx, fuse_length, -1)
-                last_hidden_states = last_hidden_states[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length, d_model]
-                last_hidden_states = last_hidden_states.reshape(bsz, self.top_k_candidates*fuse_length, -1)
-                attention_mask = attention_mask.reshape(bsz, self.n_ctx, fuse_length)
-                attention_mask = attention_mask[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length]
-                attention_mask = attention_mask.reshape(bsz, self.top_k_candidates*fuse_length)
-                if self.encoder_attention_mask_used:
-                    self.encoder_attention_mask = attention_mask
-                    self.encoder_attention_mask_used = False
-                else:
-                    self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, attention_mask), dim=0)
+            last_hidden_states = outputs[0].reshape(bsz, self.n_ctx, fuse_length, -1)
+            last_hidden_states = last_hidden_states[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length, d_model]
+            last_hidden_states = last_hidden_states.reshape(bsz, self.top_k_candidates*fuse_length, -1)
+            attention_mask = attention_mask.reshape(bsz, self.n_ctx, fuse_length)
+            attention_mask = attention_mask[torch.arange(bsz).unsqueeze(1), top_k_indices] # [bsz, top_k_candidates, fuse_length]
+            attention_mask = attention_mask.reshape(bsz, self.top_k_candidates*fuse_length)
+            if self.encoder_attention_mask_used:
+                self.encoder_attention_mask = attention_mask
+                self.encoder_attention_mask_used = False
             else:
-                last_hidden_states = outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1)
-                attention_mask = attention_mask.reshape(bsz, self.n_ctx*fuse_length)
-                if self.encoder_attention_mask_used:
-                    self.encoder_attention_mask = attention_mask
-                    self.encoder_attention_mask_used = False
-                else:
-                    self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, attention_mask), dim=0)
+                self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, attention_mask), dim=0)
+        else:
+            last_hidden_states = outputs[0].reshape(bsz, self.n_ctx*fuse_length, -1)
+            attention_mask = attention_mask.reshape(bsz, self.n_ctx*fuse_length)
+            if self.encoder_attention_mask_used:
+                self.encoder_attention_mask = attention_mask
+                self.encoder_attention_mask_used = False
+            else:
+                self.encoder_attention_mask = torch.cat((self.encoder_attention_mask, attention_mask), dim=0)
 
 
         outputs = (last_hidden_states, ) + outputs[1:]

@@ -19,10 +19,9 @@ import pprint
 import src.dualfid.slurm
 import src.dualfid.util
 import src.dualfid.data
-import src.dualfid.model
+import src.dualfid.fid
 import warnings
 from src.dualfid.options import Options
-from src.dualfid.model_util import augment_training_data
 warnings.filterwarnings("ignore")
 
 def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, collator, best_dev_score, checkpoint_path):
@@ -247,25 +246,25 @@ if __name__ == "__main__":
     model_name = opt.model_type + '-' + opt.model_size
     if opt.model_type == 't5':
         model_name = "t5-" + opt.model_size
-        model_class = src.dualfid.model.FiDT5
+        model_class = src.dualfid.fid.FiDT5
         hf_model_class = transformers.T5ForConditionalGeneration
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == "dualt5":
         model_name = "t5-" + opt.model_size
-        model_class = src.dualfid.model.DualFiDT5
+        model_class = src.dualfid.fid.DualFiDT5
         hf_model_class = transformers.T5ForConditionalGeneration
         tokenizer = transformers.T5Tokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == 'bart':
         model_name = "facebook/bart-large-cnn"
-        model_class = src.dualfid.model.FiDBART
+        model_class = src.dualfid.fid.FiDBART
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.FiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)
     elif opt.model_type == "dualbart":
         model_name = "facebook/bart-large-cnn"
-        model_class = src.dualfid.model.DualFiDBART
+        model_class = src.dualfid.fid.DualFiDBART
         hf_model_class = transformers.BartForConditionalGeneration
         tokenizer = transformers.BartTokenizer.from_pretrained(model_name)
         collator = src.dualfid.data.DualFiDCollator(opt.source_maxlength, tokenizer, opt.candidate_maxlength)

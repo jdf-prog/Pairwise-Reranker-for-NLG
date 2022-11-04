@@ -2,6 +2,7 @@ import torch
 import os
 import numpy as np
 import torch.nn.functional as F
+import transformers
 from dualfid.data import Dataset
 from transformers import TrainingArguments, Trainer, WEIGHTS_NAME, CONFIG_NAME
 from dualfid.reranker import (
@@ -11,37 +12,29 @@ from dualfid.reranker import (
     CompareGenReranker,
     DualCompareReranker
 )
+from dualfid.fid import (
+    DualFiDBART,
+    DualFiDT5,
+    FiDBART,
+    FiDT5,
+)
+from dualfid.collator import (
+    DualCollator,
+    DualCompareCollator,
+    DualFiDCollator,
+    FiDCollator,
+    SCRCollator,
+    CrossCompareCollator,
+    CompareGenCollator
+)
 from transformers import (
     RobertaModel,
     BertModel,
-    T5ForConditionalGeneration
+    T5ForConditionalGeneration,
+    BartForConditionalGeneration,
 )
 from transformers.models.roberta.modeling_roberta import RobertaModel
-def regression_BCE_loss(x, aux_loss, scores):
 
-    scores = scores.to(x.device)
-    assert x.shape == scores.shape
-    # compute contrastive loss
-    if aux_loss is not None:
-        loss = torch.tensor(aux_loss).to(x.device)
-    else:
-        loss = torch.tensor(0.0).to(x.device)
-    # labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device) # only the best one
-    labels = torch.gt(scores, torch.mean(scores, dim=1, keepdim=True)[0]).float().to(x.device) # select half of the best ones
-    loss = F.binary_cross_entropy(x, labels, reduction='mean')
-    return torch.sum(x, dim=-1), loss
-
-def augment_training_data(dataset: Dataset):
-    # argument data
-    augment_data = []
-    for item in dataset.data:
-        max_score_candidate = sorted(item['candidates'], key=lambda x: sum(x['scores'].values()), reverse=True)[:2]
-        augment_data.append(item)
-        for candidate in max_score_candidate:
-            augment_item = item.copy()
-            augment_item['target'] = candidate['text']
-            augment_data.append(augment_item)
-    dataset.data = augment_data
 
 def build_pretrained_model(model_type, model_name, cache_dir=None):
     model = None
@@ -54,6 +47,9 @@ def build_pretrained_model(model_type, model_name, cache_dir=None):
     elif model_type.startswith("t5"):
         print("\nUsing T5 model")
         model = T5ForConditionalGeneration.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("bart"):
+        print("\nUsing BART model")
+        model = BartForConditionalGeneration.from_pretrained(model_name, cache_dir = cache_dir)
     return model
 
 def build_tokenizer(model_type, model_name, cache_dir=None):
@@ -70,6 +66,10 @@ def build_tokenizer(model_type, model_name, cache_dir=None):
         print("\nUsing T5 tokenizer")
         from transformers import T5TokenizerFast
         tokenizer = T5TokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("bart"):
+        print("\nUsing BART tokenizer")
+        from transformers import BartTokenizerFast
+        tokenizer = BartTokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
     return tokenizer
 
 def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
@@ -88,3 +88,49 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
         reranker = CompareGenReranker(pretrained_model, config)
 
     return reranker
+
+def build_fid(fid_type, model_type, model_name, cache_dir, config):
+    fid = None
+    if fid_type == 'fid':
+        if model_type.startswith("t5"):
+            fid_class = FiDT5
+        elif model_type.startswith("bart"):
+            fid_class = FiDBART
+        else:
+            raise ValueError(f"model_type {model_type} not supported")
+    elif fid_type == "dualfid":
+        if model_type.startswith("t5"):
+            fid_class = DualFiDT5
+        elif model_type.startswith("bart"):
+            fid_class = DualFiDBART
+        else:
+            raise ValueError(f"model_type {model_type} not supported")
+    else:
+        raise NotImplementedError
+
+    hf_model = build_pretrained_model(model_type, model_name, cache_dir)
+    hf_config = hf_model.config
+    for k, v in config.items():
+        setattr(hf_config, k, v)
+    fid = fid_class(hf_model.config)
+    fid.load_hfm(hf_model.state_dict())
+
+    return fid
+
+def build_collator(model_type:str):
+    if model_type == "fid":
+        return FiDCollator
+    elif model_type == "dualfid":
+        return DualFiDCollator
+    elif model_type == "scr":
+        return SCRCollator
+    elif model_type == "dual":
+        return DualCollator
+    elif model_type == "crosscompare":
+        return CrossCompareCollator
+    elif model_type == "dualcompare":
+        return DualCompareCollator
+    elif model_type == "t5comparegen":
+        return CompareGenCollator
+    else:
+        raise ValueError(f"model_type {model_type} not supported")

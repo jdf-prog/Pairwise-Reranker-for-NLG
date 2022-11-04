@@ -4,8 +4,6 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from gc import callbacks
-from sre_parse import State
 import time
 import os
 import sys
@@ -19,31 +17,32 @@ import os
 import pprint
 import warnings
 import logging
-from transformers import TrainingArguments
+from typing import Dict, List, Optional, Tuple, Union, Any
+from transformers import EvalPrediction
 from transformers.trainer_utils import PredictionOutput
+from transformers.training_args_seq2seq import Seq2SeqTrainingArguments
+from functools import partial
 warnings.filterwarnings("ignore")
 from src.common.utils import (
     str2bool,
     seed_everything
 )
-from src.dualfid.trainer import (
-    compute_metrics,
-)
 from src.dualfid.model_util import (
-    build_reranker,
-    build_tokenizer
+    build_fid,
+    build_tokenizer,
+    build_collator,
+
 )
 from src.dualfid.data import (
     load_data,
     Dataset
 )
-from src.dualfid.collator import (
-    build_collator
+from src.common.evaluation import (
+    overall_eval
 )
 from src.dualfid.trainer import (
-    RerankerTrainer,
+    FiDTrainer,
 )
-
 def main(args):
     seed_everything(args.seed)
 
@@ -70,7 +69,7 @@ def main(args):
         predict_dataset = Dataset(predict_examples, args.n_candidate)
 
     # set up data collator
-    data_collator_class = build_collator(args.reranker_type)
+    data_collator_class = build_collator(args.fid_type)
     data_collator = data_collator_class(args.source_maxlength, tokenizer, args.candidate_maxlength)
 
     if args.do_train:
@@ -82,19 +81,15 @@ def main(args):
 
     # set up model
     config = {
-            "n_tasks": args.n_tasks,
-            "num_pos": args.num_pos,
-            "num_neg": args.num_neg,
-            "sub_sampling_ratio": args.sub_sampling_ratio,
-            "sub_sampling_mode": args.sub_sampling_mode,
-            "loss_type": args.loss_type,
-            "localize": args.localize,
-            "localize_ratio": args.localize_ratio,
-        }
+        "n_tasks": args.n_tasks,
+        "use_aux_loss": args.use_aux_loss,
+        "top_k_candidates": args.top_k_candidates,
+    }
+
     if args.load_checkpoint:
-        # config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
-        model = build_reranker(
-            args.reranker_type,
+
+        model = build_fid(
+            args.fid_type,
             args.model_type,
             args.model_name,
             args.cache_dir,
@@ -107,18 +102,8 @@ def main(args):
         else:
             logging.info(f"Successfully loaded checkpoint from '{args.load_checkpoint}'")
     else:
-        config = {
-            "n_tasks": args.n_tasks,
-            "num_pos": args.num_pos,
-            "num_neg": args.num_neg,
-            "sub_sampling_ratio": args.sub_sampling_ratio,
-            "sub_sampling_mode": args.sub_sampling_mode,
-            "loss_type": args.loss_type,
-            "localize": args.localize,
-            "localize_ratio": args.localize_ratio,
-        }
-        model = build_reranker(
-            args.reranker_type,
+        model = build_fid(
+            args.fid_type,
             args.model_type,
             args.model_name,
             args.cache_dir,
@@ -128,7 +113,7 @@ def main(args):
 
 
     # set up trainer
-    training_args = TrainingArguments(
+    training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
         overwrite_output_dir=args.overwrite_output_dir,
         do_train=args.do_train,
@@ -153,23 +138,25 @@ def main(args):
         load_best_model_at_end=args.load_best_model_at_end,
         metric_for_best_model=args.metric_for_best_model,
         seed=args.seed,
-        disable_tqdm=False,
-        greater_is_better=True,
         local_rank=args.local_rank,
         fp16=args.fp16,
         deepspeed=args.deepspeed, #
         sharded_ddp=args.sharded_ddp,
-        label_names=args.label_names,
         evaluation_strategy=args.evaluation_strategy,
         save_strategy=args.save_strategy,
         adafactor=args.adafactor,
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
+        generation_max_length=args.generation_max_length,
+        generation_num_beams=args.generation_num_beams,
+        disable_tqdm=False,
+        greater_is_better=True,
+
     )
     logging.info(f"training args: {training_args}")
-    logging.info(f"model config: {config}")
 
-    trainer = RerankerTrainer(
+    compute_metrics = partial(compute_metrics_for_seq2seq_trainer, tokenizer=tokenizer)
+    trainer = FiDTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -182,7 +169,7 @@ def main(args):
     if args.do_train:
         # set up wandb
         if args.report_to == "wandb":
-            wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
+            wandb.init(project="Fusion in Decoder", group=args.fid_type, name=args.run_name)
             wandb.config.update(args)
 
         if args.evaluate_first_step:
@@ -225,41 +212,41 @@ def main(args):
             logging.info(f"predictions saved to {output_path}")
 
 
+def compute_metrics_for_seq2seq_trainer(eval_pred: EvalPrediction, tokenizer) -> Dict[str, float]:
+    """
+    Compute metrics for seq2seq trainer
+    Note that when passing to the seq2seq trainer,
+    you should use partial function to pass the tokenizer at first
+    """
+    generated_ids, label_ids = eval_pred
+    label_ids = np.where(label_ids != -100, label_ids, tokenizer.pad_token_id)
+    generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+    label_text = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
+    metrics = overall_eval(generated_text, label_text, metrics=["rouge1", "rouge2", "rougeL", "bleu", "rougeLsum"])
+    metrics["dev_score"] = metrics["rouge2"] # dev score used for save checkpoint
+    return metrics
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
 
     # model config
-    parser.add_argument("--reranker_type", type=str, choices=[
-        "scr", "dual", "crosscompare", "dualcompare", "comparegen"
-    ], default="sc")
-    parser.add_argument("--model_type", type=str, choices=[
-        "roberta", "bert", "t5"
-    ], default="roberta")
-    parser.add_argument("--model_name", type=str, default="roberta-base")
+    parser.add_argument("--fid_type", type=str, choices=[
+        "fid", "dualfid"
+    ], default="t5")
+    parser.add_argument("--model_type", type=str, choices=["t5", "bart"], default="t5")
+    parser.add_argument("--model_name", type=str, default="t5-base")
     parser.add_argument("--load_checkpoint", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default=None)
-    parser.add_argument("--loss_type", type=str, choices=[
-      "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
-      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE"
-    ], default="BCE")
-    parser.add_argument("--localize", type=str2bool, default=False)
-    parser.add_argument("--localize_ratio", type=float, default=0.4)
+    parser.add_argument("--use_aux_loss", type=str2bool, default=False)
+    parser.add_argument("--top_k_candidates", type=int, default=-1)
 
     # data config
     parser.add_argument("--n_candidate", type=int, default=-1)
     parser.add_argument("--candidate_generation_method", type=str, default=None)
     parser.add_argument("--candidate_model", type=str, default=None)
-    parser.add_argument("--source_maxlength", type=int, default=128)
-    parser.add_argument("--candidate_maxlength", type=int, default=512)
-    parser.add_argument("--num_pos", type=int, default=0)
-    parser.add_argument("--num_neg", type=int, default=0)
-    parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
-    parser.add_argument("--sub_sampling_mode", type=str, choices=[
-        "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance", "random"
-    ], default="top_bottom")
+    parser.add_argument("--source_maxlength", type=int, default=512)
+    parser.add_argument("--candidate_maxlength", type=int, default=128)
 
     # running config
     parser.add_argument("--seed", type=int, default=42)
@@ -302,6 +289,10 @@ if __name__ == "__main__":
     parser.add_argument("--test_data_path", type=str, default=None)
     parser.add_argument("--save_predictions", type=str2bool, default=True)
 
+    # generation config
+    parser.add_argument("--generation_max_length", type=int, default=128)
+    parser.add_argument("--generation_num_beams", type=int, default=2)
+
     # logging
     parser.add_argument("--logging_first_step", type=str2bool, default=True)
     parser.add_argument("--logging_steps", type=int, default=5)
@@ -329,10 +320,9 @@ if __name__ == "__main__":
     args.load_best_model_at_end = args.do_train and args.do_predict
     # set up default output dir
     if args.output_dir is None:
-        args.output_dir = f"outputs/{args.reranker_type}/{args.model_name}/{args.run_name}"
+        args.output_dir = f"outputs/{args.fid_type}/{args.model_name}/{args.run_name}"
 
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
-    args.label_names = ["scores"]
 
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
@@ -343,3 +333,6 @@ if __name__ == "__main__":
     logging.basicConfig(level="INFO")
     logging.info("args: %s", args)
     main(args)
+
+
+

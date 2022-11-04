@@ -19,9 +19,6 @@ from dualfid.wrapper import (
     DualFiDEncoderWrapper,
     DecoderWrapper,
 )
-from dualfid.model_util import (
-    regression_BCE_loss,
-)
 from transformers.models.bart.modeling_bart import shift_tokens_right
 class DualFiDBART(transformers.BartForConditionalGeneration):
     def __init__(self, config):
@@ -459,11 +456,8 @@ class FiDT5(transformers.T5ForConditionalGeneration):
         Unwrap Fusion-in-Decoder encoder, useful to load T5 weights.
         """
         self.encoder = self.encoder.encoder
-        block = []
-        for mod in self.encoder.block:
-            block.append(mod.module)
-        block = nn.ModuleList(block)
-        self.encoder.block = block
+        self.decoder = self.decoder.decoder
+
 
     def load_hfm(self, state_dict):
         """ load huggingface model """
@@ -511,3 +505,17 @@ class FiDT5(transformers.T5ForConditionalGeneration):
 
 
 
+
+def regression_BCE_loss(x, aux_loss, scores):
+
+    scores = scores.to(x.device)
+    assert x.shape == scores.shape
+    # compute contrastive loss
+    if aux_loss is not None:
+        loss = torch.tensor(aux_loss).to(x.device)
+    else:
+        loss = torch.tensor(0.0).to(x.device)
+    # labels = torch.eq(scores, torch.max(scores, dim=1, keepdim=True)[0]).float().to(x.device) # only the best one
+    labels = torch.gt(scores, torch.mean(scores, dim=1, keepdim=True)[0]).float().to(x.device) # select half of the best ones
+    loss = F.binary_cross_entropy(x, labels, reduction='mean')
+    return torch.sum(x, dim=-1), loss
