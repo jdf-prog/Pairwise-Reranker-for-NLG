@@ -77,10 +77,10 @@ class FiDTrainer(Seq2SeqTrainer):
 #     scores = labels
 #     agg_scores = np.sum(scores, axis=-1) # aggregate scores
 
-#     sort_indices = np.flip(np.argsort(agg_scores, axis=-1), axis=-1) # (batch_size, n_candidate), expected ranks
+#     sort_indices = np.flip(np.argsort(agg_scores, axis=-1), axis=-1) # (batch_size, n_candidates), expected ranks
 #     ranks = np.zeros_like(sort_indices)
 #     ranks[np.arange(sort_indices.shape[0])[:, None], sort_indices] = np.arange(sort_indices.shape[-1])
-#     pred_sort_indices = np.flip(np.argsort(pred_scores, axis=-1), axis=-1) # (batch_size, n_candidate), predicted ranks
+#     pred_sort_indices = np.flip(np.argsort(pred_scores, axis=-1), axis=-1) # (batch_size, n_candidates), predicted ranks
 #     pred_ranks = np.zeros_like(pred_sort_indices)
 #     pred_ranks[np.arange(pred_sort_indices.shape[0])[:, None], pred_sort_indices] = np.arange(pred_sort_indices.shape[-1])
 

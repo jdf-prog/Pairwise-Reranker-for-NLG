@@ -202,19 +202,19 @@ class CrossCompareCollator(object):
         batch_scores = [b['scores'] for b in batch]
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
-        n_candidate = len(batch_candidates[0])
+        n_candidates = len(batch_candidates[0])
 
-        batch_candidate_pairs = [[[None for _ in range(n_candidate)] for _ in range(n_candidate)] for _ in range(batch_size)]
-        batch_cand_target_pairs = [[None for _ in range(n_candidate)] for _ in range(batch_size)]
+        batch_candidate_pairs = [[[None for _ in range(n_candidates)] for _ in range(n_candidates)] for _ in range(batch_size)]
+        batch_cand_target_pairs = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
 
-        target_rand_mat = torch.rand(batch_size, n_candidate) > 0.5
+        target_rand_mat = torch.rand(batch_size, n_candidates) > 0.5
         scores = torch.stack(batch_scores, dim=0)
         batch_cand_target_dif_scores = torch.where(target_rand_mat.unsqueeze(-1), scores - 1.0, 1.0 - scores)
 
         for bz in range(batch_size):
-            n_candidate = len(batch_candidates[bz])
-            for i in range(n_candidate):
-                for j in range(n_candidate):
+            n_candidates = len(batch_candidates[bz])
+            for i in range(n_candidates):
+                for j in range(n_candidates):
                     if self.postfix is not None:
                         batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j], self.postfix])
                     else:
@@ -228,7 +228,7 @@ class CrossCompareCollator(object):
         encoded_cand_target_ids, encoded_cand_target_masks = encode_batch_text(batch_cand_target_pairs, self.tokenizer, self.tokenizer.model_max_length) # candidates
         encoded_cand_pair_ids, encoded_cand_pair_masks = [], []
         for bz in range(batch_size):
-            n_candidate = len(batch_candidates[bz])
+            n_candidates = len(batch_candidates[bz])
             ids, mask = encode_batch_text(batch_candidate_pairs[bz], self.tokenizer, self.tokenizer.model_max_length)
             encoded_cand_pair_ids.append(ids)
             encoded_cand_pair_masks.append(mask)
@@ -284,19 +284,19 @@ class DualCompareCollator(object):
         batch_scores = [b['scores'] for b in batch]
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
-        n_candidate = len(batch_candidates[0])
+        n_candidates = len(batch_candidates[0])
 
-        batch_candidate_pairs = [[[None for _ in range(n_candidate)] for _ in range(n_candidate)] for _ in range(batch_size)]
-        batch_cand_target_pairs = [[None for _ in range(n_candidate)] for _ in range(batch_size)]
+        batch_candidate_pairs = [[[None for _ in range(n_candidates)] for _ in range(n_candidates)] for _ in range(batch_size)]
+        batch_cand_target_pairs = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
 
-        target_rand_mat = torch.rand(batch_size, n_candidate) > 0.5
+        target_rand_mat = torch.rand(batch_size, n_candidates) > 0.5
         scores = torch.stack(batch_scores, dim=0)
         batch_cand_target_dif_scores = torch.where(target_rand_mat.unsqueeze(-1), scores - 1.0, 1.0 - scores)
 
         for bz in range(batch_size):
-            n_candidate = len(batch_candidates[bz])
-            for i in range(n_candidate):
-                for j in range(n_candidate):
+            n_candidates = len(batch_candidates[bz])
+            for i in range(n_candidates):
+                for j in range(n_candidates):
                     if self.postfix is not None:
                         batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j], self.postfix])
                     else:
@@ -310,7 +310,7 @@ class DualCompareCollator(object):
         encoded_cand_target_ids, encoded_cand_target_masks = encode_batch_text(batch_cand_target_pairs, self.tokenizer, self.tokenizer.model_max_length) # candidates
         encoded_cand_pair_ids, encoded_cand_pair_masks = [], []
         for bz in range(batch_size):
-            n_candidate = len(batch_candidates[bz])
+            n_candidates = len(batch_candidates[bz])
             ids, mask = encode_batch_text(batch_candidate_pairs[bz], self.tokenizer, self.tokenizer.model_max_length)
             encoded_cand_pair_ids.append(ids)
             encoded_cand_pair_masks.append(mask)
@@ -367,11 +367,11 @@ class CompareGenCollator(object):
         batch_scores = [b['scores'] for b in batch]
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
-        n_candidate = len(batch_candidates[0])
+        n_candidates = len(batch_candidates[0])
 
         scores = torch.stack(batch_scores, dim=0)
         sum_scores = torch.sum(scores, dim=-1)
-        random_idxs1 = torch.random.randperm(n_candidate)
+        random_idxs1 = torch.random.randperm(n_candidates)
         random_idxs2 = random_idxs1.roll(1)
         if self.postfix is not None:
             batch_candidate_pairs = [
@@ -383,7 +383,7 @@ class CompareGenCollator(object):
                 for bz, cands in enumerate(batch_candidates)
             ]
             batch_cand_target_pairs = [
-                [self.separate_token.join([cands[i], t, self.postfix]) for i in range(n_candidate)]
+                [self.separate_token.join([cands[i], t, self.postfix]) for i in range(n_candidates)]
                 for cands, t in zip(batch_candidates, batch_target)
             ]
             batch_cand_target_pair_targets = batch_target
@@ -397,7 +397,7 @@ class CompareGenCollator(object):
                 for bz, cands in enumerate(batch_candidates)
             ]
             batch_cand_target_pairs = [
-                [self.separate_token.join(cands[i], t) for i in range(n_candidate)]
+                [self.separate_token.join(cands[i], t) for i in range(n_candidates)]
                 for cands, t in zip(batch_candidates, batch_target)
             ]
             batch_cand_target_pair_targets = batch_target

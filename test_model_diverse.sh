@@ -37,5 +37,5 @@ python test_model.py \
         --source_maxlength ${source_maxlength} \
         --candidate_maxlength ${candidate_maxlength} \
         --per_gpu_batch_size 2 \
-        --n_candidate 6 \
+        --n_candidates 6 \
         --main_port 19001 \

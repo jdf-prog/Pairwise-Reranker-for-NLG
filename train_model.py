@@ -229,7 +229,7 @@ if __name__ == "__main__":
         world_size=opt.world_size,
         n_tasks=opt.n_tasks,
     )
-    train_dataset = src.dualfid.data.Dataset(train_examples, opt.n_candidate)
+    train_dataset = src.dualfid.data.Dataset(train_examples, opt.n_candidates)
     # augment_training_data(train_dataset) # debug
     # use golbal rank and world size to split the eval set on multiple gpus
     eval_examples = src.dualfid.data.load_data(
@@ -238,7 +238,7 @@ if __name__ == "__main__":
         world_size=opt.world_size,
         n_tasks=opt.n_tasks,
     )
-    eval_dataset = src.dualfid.data.Dataset(eval_examples, opt.n_candidate)
+    eval_dataset = src.dualfid.data.Dataset(eval_examples, opt.n_candidates)
     assert train_dataset.n_tasks == eval_dataset.n_tasks
     opt.n_tasks = train_dataset.n_tasks
 

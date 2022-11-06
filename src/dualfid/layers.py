@@ -72,10 +72,10 @@ class MoERegression(nn.Module):
 
 
     def forward(self, x):
-        _, n_candidate, _ = x.size()
+        _, n_candidates, _ = x.size()
         pred_scores = []
         total_aux_loss = torch.tensor(0.0, device=x.device)
-        for i in range(n_candidate):
+        for i in range(n_candidates):
             encs = x[:, i, :] # [CLS]
             preds_i = self.fc2(self.relu(self.fc1(encs))) # shared bottom
             train = self.training

@@ -60,13 +60,13 @@ def main(args):
     predict_dataset = None
     if args.do_train:
         train_examples = load_data(args.train_data_path, args)
-        train_dataset = Dataset(train_examples, args.n_candidate)
+        train_dataset = Dataset(train_examples, args.n_candidates)
     if args.do_eval:
         eval_examples = load_data(args.eval_data_path, args)
-        eval_dataset = Dataset(eval_examples, args.n_candidate)
+        eval_dataset = Dataset(eval_examples, args.n_candidates)
     if args.do_predict:
         predict_examples = load_data(args.test_data_path, args)
-        predict_dataset = Dataset(predict_examples, args.n_candidate)
+        predict_dataset = Dataset(predict_examples, args.n_candidates)
 
     # set up data collator
     data_collator_class = build_collator(args.fid_type)
@@ -242,7 +242,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_k_candidates", type=int, default=-1)
 
     # data config
-    parser.add_argument("--n_candidate", type=int, default=-1)
+    parser.add_argument("--n_candidates", type=int, default=-1)
     parser.add_argument("--candidate_generation_method", type=str, default=None)
     parser.add_argument("--candidate_model", type=str, default=None)
     parser.add_argument("--source_maxlength", type=int, default=512)

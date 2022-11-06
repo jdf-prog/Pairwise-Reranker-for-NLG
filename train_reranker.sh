@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --time=12:00:00
+#SBATCH --time=48:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ./jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:6000:1
 #SBATCH --qos=general
 #SBATCH -n 1
 
@@ -27,7 +27,7 @@ localhost=$RANDOM
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \
-#     --n_candidate 30 \
+#     --n_candidates 30 \
 #     --candidate_model "pegasus_cnndm" \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 384 \
@@ -62,7 +62,7 @@ localhost=$RANDOM
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \
-#     --n_candidate 30 \
+#     --n_candidates 30 \
 #     --candidate_model "pegasus_cnndm" \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 512 \
@@ -95,7 +95,7 @@ localhost=$RANDOM
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \
-#     --n_candidate 30 \
+#     --n_candidates 30 \
 #     --candidate_model "pegasus_cnndm" \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 512 \
@@ -119,11 +119,11 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_curriculum" \
+    --run_name "debug_curriculum_poisson" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
-    --n_candidate 30 \
+    --n_candidates 30 \
     --candidate_model "pegasus_cnndm" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
@@ -133,12 +133,13 @@ train_reranker.py \
     --gradient_accumulation_steps 16 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
-    --num_pos 2 \
-    --num_neg 2 \
+    --num_pos 10 \
+    --num_neg 10 \
     --evaluation_strategy "steps" \
     --save_strategy "steps" \
     --eval_steps 100 \
     --save_steps 100 \
+    --sub_sampling_mode "poisson_dynamic" \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_mean/checkpoint-best" \
     # --do_train False \
     # --do_eval False \
@@ -161,7 +162,7 @@ train_reranker.py \
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \
-#     --n_candidate 30 \
+#     --n_candidates 30 \
 #     --candidate_model "pegasus_cnndm" \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 256 \

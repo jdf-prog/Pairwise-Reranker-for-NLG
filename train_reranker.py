@@ -65,13 +65,13 @@ def main(args):
     predict_dataset = None
     if args.do_train:
         train_examples = load_data(args.train_data_path, args)
-        train_dataset = Dataset(train_examples, args.n_candidate)
+        train_dataset = Dataset(train_examples, args.n_candidates)
     if args.do_eval:
         eval_examples = load_data(args.eval_data_path, args)
-        eval_dataset = Dataset(eval_examples, args.n_candidate)
+        eval_dataset = Dataset(eval_examples, args.n_candidates)
     if args.do_predict:
         predict_examples = load_data(args.test_data_path, args)
-        predict_dataset = Dataset(predict_examples, args.n_candidate)
+        predict_dataset = Dataset(predict_examples, args.n_candidates)
 
 
 
@@ -93,6 +93,8 @@ def main(args):
         "localize": args.localize,
         "localize_ratio": args.localize_ratio,
         "new_num_tokens": len(tokenizer),
+        "training_data_size": len(train_dataset) if train_dataset else 0,
+        "n_candidates": args.n_candidates,
     }
     if args.load_checkpoint:
         # config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
@@ -242,7 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--localize_ratio", type=float, default=0.4)
 
     # data config
-    parser.add_argument("--n_candidate", type=int, default=-1)
+    parser.add_argument("--n_candidates", type=int, default=-1)
     parser.add_argument("--candidate_generation_method", type=str, default=None)
     parser.add_argument("--candidate_model", type=str, default=None)
     parser.add_argument("--source_maxlength", type=int, default=128)
@@ -252,7 +254,7 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance", "random"
+        "importance", "random", "poisson_dynamic"
     ], default="top_bottom")
 
     # running config

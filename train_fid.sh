@@ -26,7 +26,7 @@ train_fid.py \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
-    --n_candidate 1 \
+    --n_candidates 1 \
     --candidate_model "pegasus_cnndm" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 384 \

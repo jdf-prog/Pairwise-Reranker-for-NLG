@@ -43,7 +43,7 @@ python \
         --scheduler linear \
         --weight_decay 0.001 \
         --per_gpu_batch_size 1 \
-        --n_candidate 10 \
+        --n_candidates 10 \
         --total_step 25000 \
         --warmup_step 3000 \
         --main_port 19003 \

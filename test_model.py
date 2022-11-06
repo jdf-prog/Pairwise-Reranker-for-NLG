@@ -151,7 +151,7 @@ if __name__ == "__main__":
     )
     eval_dataset = src.dualfid.data.Dataset(
         eval_examples,
-        opt.n_candidate,
+        opt.n_candidates,
     )
 
     eval_sampler = SequentialSampler(eval_dataset)

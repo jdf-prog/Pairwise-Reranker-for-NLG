@@ -12,9 +12,9 @@ import numpy as np
 class Dataset(torch.utils.data.Dataset):
     def __init__(self,
                  data,
-                 n_candidate=None):
+                 n_candidates=None):
         self.data = data
-        self.n_candidate = n_candidate if n_candidate is not None and n_candidate > 0 else None
+        self.n_candidates = n_candidates if n_candidates is not None and n_candidates > 0 else None
         self.n_tasks = len(self.data[0]['candidates'][0]['scores']) if 'candidates' in self.data[0] else -1
 
     def __len__(self):
@@ -25,8 +25,8 @@ class Dataset(torch.utils.data.Dataset):
             'index' : index,
             'source' : self.data[index]['source'],
             'target' : self.data[index]["target"],
-            'candidates' : ["{}".format(c['text']) for c in self.data[index]['candidates'][:self.n_candidate]]  if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
-            'scores' : torch.tensor([[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidate]]) if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
+            'candidates' : ["{}".format(c['text']) for c in self.data[index]['candidates'][:self.n_candidates]]  if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
+            'scores' : torch.tensor([[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidates]]) if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
         }
 
     def get_example(self, index):
@@ -69,13 +69,13 @@ def check_scores(examples):
     """
         Check the upper bound of the scores and print it
     """
-    n_candidate = len(examples[0]['candidates'])
+    n_candidates = len(examples[0]['candidates'])
     task_names = list(examples[0]['candidates'][0]['scores'].keys())
     max_scores = {task:[] for task in task_names}
     for example in examples:
         for task in task_names:
             max_scores[task].append(max([c['scores'][task] for c in example['candidates']]))
-    candidate_scores = {task:[np.mean([ex['candidates'][i]['scores'][task] for ex in examples]) for i in range(n_candidate)] for task in task_names}
+    candidate_scores = {task:[np.mean([ex['candidates'][i]['scores'][task] for ex in examples]) for i in range(n_candidates)] for task in task_names}
     for task in task_names:
         print(f"Selection Upper bound for task '{task}' is {np.mean(max_scores[task])}")
     for task in task_names:
