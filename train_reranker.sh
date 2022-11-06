@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ./jobs/%j.out
 #SBATCH --gres=gpu:2080:1
+#SBATCH --qos=general
 #SBATCH -n 1
 
 train_data_path="./data/prepared/cnndm/val/dataset_train.jsonl"
@@ -118,7 +119,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_2_pos_2_neg_mean" \
+    --run_name "debug_curriculum" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -128,7 +129,7 @@ train_reranker.py \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 8 \
+    --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps 16 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
@@ -138,8 +139,7 @@ train_reranker.py \
     --save_strategy "steps" \
     --eval_steps 100 \
     --save_steps 100 \
-    --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_mean/checkpoint-2700" \
-    # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_mean/checkpoint-2700" \
+    # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_mean/checkpoint-best" \
     # --do_train False \
     # --do_eval False \
     # --do_predict True \

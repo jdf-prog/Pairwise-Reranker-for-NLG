@@ -31,14 +31,12 @@ from src.dualfid.trainer import (
 )
 from src.dualfid.model_util import (
     build_reranker,
-    build_tokenizer
+    build_tokenizer,
+    build_collator
 )
 from src.dualfid.data import (
     load_data,
     Dataset
-)
-from src.dualfid.collator import (
-    build_collator
 )
 from src.dualfid.trainer import (
     RerankerTrainer,
@@ -54,6 +52,12 @@ def main(args):
 
     # set up tokenizer
     tokenizer = build_tokenizer(args.model_type, args.model_name, args.cache_dir)
+    # set up data collator, also add prefix as new tokens to tokenizer
+    data_collator = build_collator(
+        args.reranker_type, tokenizer,
+        args.source_maxlength, args.candidate_maxlength,
+        # "source text: ", "candidate text: ", "candidate text: " # for previous version2
+    )
 
     # set up dataset
     train_dataset = None
@@ -69,9 +73,7 @@ def main(args):
         predict_examples = load_data(args.test_data_path, args)
         predict_dataset = Dataset(predict_examples, args.n_candidate)
 
-    # set up data collator
-    data_collator_class = build_collator(args.reranker_type)
-    data_collator = data_collator_class(args.source_maxlength, tokenizer, args.candidate_maxlength)
+
 
     if args.do_train:
         if args.do_eval:
@@ -82,15 +84,16 @@ def main(args):
 
     # set up model
     config = {
-            "n_tasks": args.n_tasks,
-            "num_pos": args.num_pos,
-            "num_neg": args.num_neg,
-            "sub_sampling_ratio": args.sub_sampling_ratio,
-            "sub_sampling_mode": args.sub_sampling_mode,
-            "loss_type": args.loss_type,
-            "localize": args.localize,
-            "localize_ratio": args.localize_ratio,
-        }
+        "n_tasks": args.n_tasks,
+        "num_pos": args.num_pos,
+        "num_neg": args.num_neg,
+        "sub_sampling_ratio": args.sub_sampling_ratio,
+        "sub_sampling_mode": args.sub_sampling_mode,
+        "loss_type": args.loss_type,
+        "localize": args.localize,
+        "localize_ratio": args.localize_ratio,
+        "new_num_tokens": len(tokenizer),
+    }
     if args.load_checkpoint:
         # config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
         model = build_reranker(
@@ -98,7 +101,8 @@ def main(args):
             args.model_type,
             args.model_name,
             args.cache_dir,
-            config
+            config,
+            tokenizer,
         )
         state_dict = torch.load(os.path.join(args.load_checkpoint, "pytorch_model.bin"))
         load_result = model.load_state_dict(state_dict)
@@ -107,25 +111,15 @@ def main(args):
         else:
             logging.info(f"Successfully loaded checkpoint from '{args.load_checkpoint}'")
     else:
-        config = {
-            "n_tasks": args.n_tasks,
-            "num_pos": args.num_pos,
-            "num_neg": args.num_neg,
-            "sub_sampling_ratio": args.sub_sampling_ratio,
-            "sub_sampling_mode": args.sub_sampling_mode,
-            "loss_type": args.loss_type,
-            "localize": args.localize,
-            "localize_ratio": args.localize_ratio,
-        }
         model = build_reranker(
             args.reranker_type,
             args.model_type,
             args.model_name,
             args.cache_dir,
-            config
+            config,
+            tokenizer,
         )
         logging.info(f"build new model")
-
 
     # set up trainer
     training_args = TrainingArguments(
@@ -218,10 +212,10 @@ def main(args):
             if args.output_dir is None:
                 raise ValueError("output_dir must be set to save predictions")
             output_path = os.path.join(args.output_dir, "predictions.json")
-            with open(os.path.join(args.output_dir, "predictions.json"), "w") as f:
-                json.dump(predictions.tolist(), f)
-            with open(os.path.join(args.output_dir, "labels.json"), "w") as f:
-                json.dump(labels.tolist(), f)
+            with open(os.path.join(args.output_dir, "predictions.pt"), "wb") as f:
+                torch.save(predictions, f)
+            with open(os.path.join(args.output_dir, "labels.pt"), "wb") as f:
+                torch.save(labels, f)
             logging.info(f"predictions saved to {output_path}")
 
 
@@ -235,7 +229,7 @@ if __name__ == "__main__":
         "scr", "dual", "crosscompare", "dualcompare", "comparegen"
     ], default="sc")
     parser.add_argument("--model_type", type=str, choices=[
-        "roberta", "bert", "t5"
+        "roberta", "bert", "t5", 'deberta'
     ], default="roberta")
     parser.add_argument("--model_name", type=str, default="roberta-base")
     parser.add_argument("--load_checkpoint", type=str, default=None)
@@ -330,12 +324,11 @@ if __name__ == "__main__":
     # set up default output dir
     if args.output_dir is None:
         args.output_dir = f"outputs/{args.reranker_type}/{args.model_name}/{args.run_name}"
-
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
     args.label_names = ["scores"]
-
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
+    args.local_rank = os.environ.get("LOCAL_RANK", args.local_rank)
 
     # set up logging
     if args.log_level == "passive":

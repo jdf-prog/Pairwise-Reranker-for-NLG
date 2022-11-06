@@ -50,7 +50,7 @@ class SCR(nn.Module):
 
         See SummaReranker, Refsum, BRIO for details
     """
-    def __init__(self, pretrained_model, args):
+    def __init__(self, pretrained_model, args, tokenizer=None):
         super(SCR, self).__init__()
         self.args = args
         self.n_tasks = self.args["n_tasks"]
@@ -68,6 +68,7 @@ class SCR(nn.Module):
         self.hidden_size = self.pretrained_model.config.hidden_size
         self.step = 0
         self.sigmoid = nn.Sigmoid()
+        self.tokenizer = tokenizer
 
         if 'moe' in self.loss_type.lower():
             self.bottom_hidden_size = self.hidden_size
@@ -226,7 +227,7 @@ class DualReranker(nn.Module):
 
         See DPR for details
     """
-    def __init__(self, pretrained_model, args):
+    def __init__(self, pretrained_model, args, tokenizer=None):
         super(DualReranker, self).__init__()
         self.args = args
         self.sub_sampling_mode = self.args["sub_sampling_mode"]
@@ -243,6 +244,7 @@ class DualReranker(nn.Module):
         # self.candidate_encoder = pretrained_model
         self.hidden_size = self.source_encoder.config.hidden_size
         self.step = 0
+        self.tokenizer = tokenizer
 
     def _forward(self,
         source_ids,
@@ -384,7 +386,7 @@ class CrossCompareReranker(nn.Module):
             the embeddings of the prompt 'source', 'candidate1', 'candidate2'
 
     """
-    def __init__(self, pretrained_model, args):
+    def __init__(self, pretrained_model, args, tokenizer):
         super(CrossCompareReranker, self).__init__()
         self.args = args
         self.n_tasks = self.args["n_tasks"]
@@ -395,14 +397,11 @@ class CrossCompareReranker(nn.Module):
         self.loss_type = self.args["loss_type"]
         self.drop_out = self.args.get("drop_out", 0.05)
 
-
         # LM
         self.pretrained_model = pretrained_model
-        self.hidden_size = self.pretrained_model.config.hidden_size
-        self.sep_token = self.pretrained_model.config.eos_token_id
+        self.sep_token_id = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
 
-        from transformers import RobertaTokenizerFast
-        self.tokenizer = RobertaTokenizerFast.from_pretrained("roberta-large") # debug
+        self.tokenizer = tokenizer
 
     def _forward(
         self,
@@ -426,9 +425,9 @@ class CrossCompareReranker(nn.Module):
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-        candidate_encs_idx = input_ids.eq(self.sep_token)
-        assert candidate_encs_idx.sum(-1).eq(3).all(), candidate_encs_idx.sum(-1)
-        candidate_encs_idx = candidate_encs_idx.nonzero()[:, 1].reshape(-1, 3)
+        sep_token_idx = input_ids.eq(self.sep_token_id)
+        assert sep_token_idx.sum(-1).eq(3).all(), sep_token_idx.sum(-1)
+        sep_token_idx = sep_token_idx.nonzero()[:, 1].reshape(-1, 3)
         encs = outputs.last_hidden_state
 
         source_encs = []
@@ -436,10 +435,10 @@ class CrossCompareReranker(nn.Module):
         cand2_encs = []
         random = torch.randint(0, 100, (1,)).item()
         for i in range(encs.shape[0]):
-            source_encs.append(encs[i, 1:candidate_encs_idx[i, 0]].mean(0))
+            source_encs.append(encs[i, 1:sep_token_idx[i, 0]].mean(0))
             # compute per token weight
-            cand1_enc = encs[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand1_len, hidden_size]
-            cand2_enc = encs[i, candidate_encs_idx[i, 1]+1:candidate_encs_idx[i, 2]] # [cand2_len, hidden_size]
+            cand1_enc = encs[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1]] # [cand1_len, hidden_size]
+            cand2_enc = encs[i, sep_token_idx[i, 1]+1:sep_token_idx[i, 2]] # [cand2_len, hidden_size]
             sim_mat = torch.einsum("ij,kj->ik", F.normalize(cand1_enc, dim=-1), F.normalize(cand2_enc, dim=-1)) # [cand1_len, cand2_len]
             cand1_weight = (1-(sim_mat).max(1)[0])
             cand2_weight = (1-(sim_mat).max(0)[0])
@@ -447,8 +446,8 @@ class CrossCompareReranker(nn.Module):
             cand2_weight = cand2_weight / cand2_weight.sum()
             output_heatmap = False # debug
             if output_heatmap:
-                cand1_ids = input_ids[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand1_len]
-                cand2_ids = input_ids[i, candidate_encs_idx[i, 1]+1:candidate_encs_idx[i, 2]] # [cand2_len]
+                cand1_ids = input_ids[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1]] # [cand1_len]
+                cand2_ids = input_ids[i, sep_token_idx[i, 1]+1:sep_token_idx[i, 2]] # [cand2_len]
                 cand1_tokens = self.tokenizer.convert_ids_to_tokens(cand1_ids.tolist())
                 cand2_tokens = self.tokenizer.convert_ids_to_tokens(cand2_ids.tolist())
                 cand1_text = self.tokenizer.decode(cand1_ids.tolist())
@@ -465,6 +464,19 @@ class CrossCompareReranker(nn.Module):
         source_encs = torch.stack(source_encs, dim=0)
         cand1_encs = torch.stack(cand1_encs, dim=0)
         cand2_encs = torch.stack(cand2_encs, dim=0)
+
+        # # get the special token <source> and <candidate>
+        # source_encs = encs[:, 1, :]
+        # cand1_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1, :]
+        # cand2_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1, :]
+        # # debug
+        # source_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[:, 1])
+        # cand1_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1])
+        # cand2_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1])
+        # assert (np.array(source_tokens) == "<source>").all(), source_tokens
+        # assert (np.array(cand1_tokens) == "<candidate1>").all(), cand1_tokens
+        # assert (np.array(cand2_tokens) == "<candidate2>").all(), cand2_tokens
+
 
         left_sim = F.cosine_similarity(source_encs, cand1_encs)
         right_sim = F.cosine_similarity(source_encs, cand2_encs)
@@ -502,11 +514,23 @@ class CrossCompareReranker(nn.Module):
             # subsampling
             batch_size, n_candidate, n_tasks = scores.shape
             scores = scores.sum(dim=-1)
+            cand_target_dif_scores = cand_target_dif_scores.sum(dim=-1)
 
             sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidate]
             n_pair = min(self.num_pos, self.num_neg)
+
+            # NOTE: different sampling strategy
+
+            # 1. top bottom sampling
             pos_idx = sorted_idx[:, :n_pair]
             neg_idx = sorted_idx[:, -n_pair:]
+
+            # 2. top bottom random sampling
+            # pos_idx = sorted_idx[:, :n_pair][torch.arange(batch_size).unsqueeze(1), torch.stack([torch.randperm(n_pair) for _ in range(batch_size)], dim=0)]
+            # neg_idx = sorted_idx[:, -n_pair:][torch.arange(batch_size).unsqueeze(1), torch.stack([torch.randperm(n_pair) for _ in range(batch_size)], dim=0)]
+
+            # 3. dynamic sampling
+
             shuffle_flag = torch.rand(batch_size, n_pair, device=device) < 0.5
             left_idx = torch.where(shuffle_flag, neg_idx, pos_idx)
             right_idx = torch.where(shuffle_flag, pos_idx, neg_idx)
@@ -514,17 +538,45 @@ class CrossCompareReranker(nn.Module):
             candidate_pair_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), left_idx, right_idx] # [batch_size, n_pair, candidate_len]
 
             dif_scores = scores[torch.arange(batch_size).unsqueeze(1), left_idx] - scores[torch.arange(batch_size).unsqueeze(1), right_idx]
-            left_labels = (dif_scores > 0).float()
-            right_labels = (dif_scores < 0).float()
             left_sim, right_sim = self._forward(
                 candidate_pair_ids,
                 candidate_pair_attention_mask,
             )
 
+            # NOTE: different loss types
+
+            # 1. triplet ranking loss
+            # dif_scores_sign = torch.sign(dif_scores)
+            # dif_sim = left_sim - right_sim
+            # loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
+
+            # 2. BCE Loss
+            left_labels = (dif_scores > 0).float()
+            right_labels = (dif_scores < 0).float()
             loss = torch.tensor(0.0, device=device)
             loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
             loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
             loss /= 2
+
+            # # 3. MSE Loss
+            # loss = F.mse_loss(left_sim - right_sim, dif_scores)
+
+            # NOTE: Auxliary Loss: compute target loss
+            pair_idx = torch.randperm(n_candidate, device=device)[:n_pair]
+            candidate_target_ids = candidate_target_ids[torch.arange(batch_size).unsqueeze(1), pair_idx] # [batch_size, n_pair, candidate_len]
+            candidate_target_attention_mask = candidate_target_attention_mask[torch.arange(batch_size).unsqueeze(1), pair_idx] # [batch_size, n_pair, candidate_len]
+            dif_scores = cand_target_dif_scores[torch.arange(batch_size).unsqueeze(1), pair_idx]
+            left_labels = (dif_scores > 0).float()
+            right_labels = (dif_scores < 0).float()
+            left_sim, right_sim = self._forward(
+                candidate_target_ids,
+                candidate_target_attention_mask,
+            )
+            target_loss = torch.tensor(0.0, device=device)
+            target_loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
+            target_loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
+            target_loss = target_loss / 2
+            loss += target_loss
 
             outputs = {
                 "loss": loss,
@@ -532,7 +584,15 @@ class CrossCompareReranker(nn.Module):
         else:
             batch_size, n_candidate, _, candidate_len = candidate_pair_ids.shape
             scores = torch.mean(scores, dim=-1) # [batch_size, n_candidate]
-            permu = torch.randperm(n_candidate).repeat(batch_size, 1).to(device) # [batch_size, n_candidate]
+            sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidate]
+            ranks = torch.zeros_like(sorted_idx)
+            ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidate, device=device)
+
+            # NOTE: dofferent comparison order
+            permu = torch.randperm(n_candidate).repeat(batch_size, 1).to(device) # [batch_size, n_candidate] random
+            # permu = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidate] from better to worse
+            # permu = torch.argsort(scores, dim=1, descending=False) # [batch_size, n_candidate] from worse to better
+
             cur_idx = permu[:, 0]
             outputs = {
                 "loss": torch.tensor(0.0).to(device),
@@ -540,17 +600,44 @@ class CrossCompareReranker(nn.Module):
             initial_idx = cur_idx
             next_idxs = []
             better_idxs = []
+            consistencies = []
+            ranks_acc_dist = torch.zeros(batch_size, n_candidate, 2, device=device)
             for i in range(1, n_candidate):
                 next_idx = permu[:, i]
                 to_model_ids = candidate_pair_ids[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
                 to_model_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
                 to_model_ids = to_model_ids.view(batch_size, candidate_len)
                 to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
-                left_sim, right_sim = self._forward(
+                cand1_sim, cand2_sim = self._forward(
                     to_model_ids, to_model_attention_mask,
                 ) # [batch_size]
-                # compute accuracy
-                better_idx = torch.where(left_sim >= right_sim, cur_idx, next_idx)
+
+                # NOTE: compute compare consistency
+                to_model_ids = candidate_pair_ids[torch.arange(batch_size).unsqueeze(1), next_idx.unsqueeze(1), cur_idx.unsqueeze(1), :]
+                to_model_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), next_idx.unsqueeze(1), cur_idx.unsqueeze(1), :]
+                to_model_ids = to_model_ids.view(batch_size, candidate_len)
+                to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
+                cand2_sim_, cand1_sim_ = self._forward(
+                    to_model_ids, to_model_attention_mask,
+                ) # [batch_size]
+                consistency = (((cand1_sim - cand2_sim) * (cand1_sim_ - cand2_sim_)) > 0).float()
+                consistencies.append(consistency)
+
+                # NOTE: compute distribution of the accuracy with different ranks
+                oracle_compare_result = scores[torch.arange(batch_size), cur_idx] - scores[torch.arange(batch_size), next_idx]
+                pair_dif_ranks = ranks[torch.arange(batch_size), cur_idx] - ranks[torch.arange(batch_size), next_idx]
+                for i in range(batch_size):
+                    if (cand1_sim[i] - cand2_sim[i]) * oracle_compare_result[i] > 0:
+                        ranks_acc_dist[i, pair_dif_ranks[i], 0] += 1
+                    else:
+                        ranks_acc_dist[i, pair_dif_ranks[i], 1] += 1
+                    if (cand1_sim_[i] - cand2_sim_[i]) * oracle_compare_result[i] > 0:
+                        ranks_acc_dist[i, pair_dif_ranks[i], 0] += 1
+                    else:
+                        ranks_acc_dist[i, pair_dif_ranks[i], 1] += 1
+
+                better_idx = torch.where(cand1_sim + cand1_sim_ > cand2_sim + cand2_sim_, cur_idx, next_idx)
+                # better_idx = torch.where(cand1_sim >= cand2_sim, cur_idx, next_idx)
                 better_idxs.append(better_idx)
                 next_idxs.append(next_idx)
                 cur_idx = better_idx
@@ -560,6 +647,8 @@ class CrossCompareReranker(nn.Module):
             outputs["select_process"].append(torch.stack(next_idxs, dim=1))
             outputs["select_process"].append(torch.stack(better_idxs, dim=1))
             outputs["select_process"] = torch.stack(outputs["select_process"], dim=1) # [batch_size, 3, n_candidate]
+            outputs["consistency"] = torch.stack(consistencies, dim=1) # [batch_size, n_candidate - 1]
+            outputs["ranks_acc_dist"] = ranks_acc_dist # [n_candidate, 2]
             assert outputs["select_process"].shape == (batch_size, 3, n_candidate-1), outputs["select_process"].shape
         return outputs
 
@@ -578,7 +667,7 @@ class DualCompareReranker(nn.Module):
             the embeddings of the prompt 'source', 'candidate1', 'candidate2'
 
     """
-    def __init__(self, pretrained_model, args):
+    def __init__(self, pretrained_model, args, tokenizer=None):
         super(DualCompareReranker, self).__init__()
         self.args = args
         self.n_tasks = self.args["n_tasks"]
@@ -595,8 +684,7 @@ class DualCompareReranker(nn.Module):
         self.candidate_encoder = deepcopy(pretrained_model)
         self.sep_token = pretrained_model.config.eos_token_id
 
-        from transformers import RobertaTokenizerFast
-        self.tokenizer = RobertaTokenizerFast.from_pretrained("roberta-large") # debug
+        self.tokenizer = tokenizer
 
     def _encode_source(self, source_ids, source_attention_mask):
         """
@@ -651,9 +739,9 @@ class DualCompareReranker(nn.Module):
             attention_mask=candidate_pair_attention_mask,
             output_hidden_states=True,
         )
-        candidate_encs_idx = candidate_pair_ids.eq(self.sep_token)
-        assert candidate_encs_idx.sum(-1).eq(2).all(), candidate_encs_idx.sum(-1)
-        candidate_encs_idx = candidate_encs_idx.nonzero()[:, 1].reshape(-1, 2)
+        sep_token_idx = candidate_pair_ids.eq(self.sep_token)
+        assert sep_token_idx.sum(-1).eq(2).all(), sep_token_idx.sum(-1)
+        sep_token_idx = sep_token_idx.nonzero()[:, 1].reshape(-1, 2)
 
         # compute candidate encs
         encs = outputs.last_hidden_state
@@ -662,8 +750,8 @@ class DualCompareReranker(nn.Module):
         random = torch.randint(0, 100, (1,)).item()
         for i in range(encs.shape[0]):
             # compute per token weight
-            cand1_enc = encs[i, 1:candidate_encs_idx[i, 0]] # [cand1_len, hidden_size]
-            cand2_enc = encs[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand2_len, hidden_size]
+            cand1_enc = encs[i, 1:sep_token_idx[i, 0]] # [cand1_len, hidden_size]
+            cand2_enc = encs[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1]] # [cand2_len, hidden_size]
             sim_mat = torch.einsum("ij,kj->ik", F.normalize(cand1_enc, dim=-1), F.normalize(cand2_enc, dim=-1)) # [cand1_len, cand2_len]
             cand1_weight = (1-(sim_mat).max(1)[0])
             cand2_weight = (1-(sim_mat).max(0)[0])
@@ -671,8 +759,8 @@ class DualCompareReranker(nn.Module):
             cand2_weight = cand2_weight / cand2_weight.sum()
             output_heatmap = False # debug
             if output_heatmap:
-                cand1_ids = candidate_pair_ids[i, 1:candidate_encs_idx[i, 0]] # [cand1_len]
-                cand2_ids = candidate_pair_ids[i, candidate_encs_idx[i, 0]+1:candidate_encs_idx[i, 1]] # [cand2_len]
+                cand1_ids = candidate_pair_ids[i, 1:sep_token_idx[i, 0]] # [cand1_len]
+                cand2_ids = candidate_pair_ids[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1]] # [cand2_len]
                 cand1_tokens = self.tokenizer.convert_ids_to_tokens(cand1_ids.tolist())
                 cand2_tokens = self.tokenizer.convert_ids_to_tokens(cand2_ids.tolist())
                 cand1_text = self.tokenizer.decode(cand1_ids.tolist())
@@ -817,7 +905,7 @@ class CompareGenReranker(nn.Module):
             4. BYOL (bootstrap your own latent)
             5. Barlow Twins
     """
-    def __init__(self, pretrained_model, args):
+    def __init__(self, pretrained_model, args, tokenizer=None):
         super(CrossCompareReranker, self).__init__()
         self.args = args
         self.n_tasks = self.args["n_tasks"]
@@ -830,6 +918,7 @@ class CompareGenReranker(nn.Module):
 
         # LM
         self.pretrained_model = pretrained_model
+        self.tokenizer = tokenizer
 
     def forward(
         input_ids=None,

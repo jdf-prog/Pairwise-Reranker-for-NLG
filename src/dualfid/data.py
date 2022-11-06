@@ -12,33 +12,20 @@ import numpy as np
 class Dataset(torch.utils.data.Dataset):
     def __init__(self,
                  data,
-                 n_candidate=None,
-                 source_prefix='source text: ',
-                 candidate_prefix='candidate text: '):
+                 n_candidate=None):
         self.data = data
         self.n_candidate = n_candidate if n_candidate is not None and n_candidate > 0 else None
-        self.source_prefix = source_prefix
-        self.candidate_prefix = candidate_prefix
         self.n_tasks = len(self.data[0]['candidates'][0]['scores']) if 'candidates' in self.data[0] else -1
 
     def __len__(self):
         return len(self.data)
 
-    def get_target(self, example):
-        if 'target' in example:
-            target = example['target']
-            return target + ' </s>'
-        elif 'answers' in example:
-            return random.choice(example['answers']) + ' </s>'
-        else:
-            return None
-
     def __getitem__(self, index):
         return {
             'index' : index,
-            'source' : self.source_prefix + self.data[index]['source'],
-            'target' : self.get_target(self.data[index]),
-            'candidates' : [(self.candidate_prefix + "{}").format(c['text']) for c in self.data[index]['candidates'][:self.n_candidate]]  if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
+            'source' : self.data[index]['source'],
+            'target' : self.data[index]["target"],
+            'candidates' : ["{}".format(c['text']) for c in self.data[index]['candidates'][:self.n_candidate]]  if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
             'scores' : torch.tensor([[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidate]]) if ('candidates' in self.data[index] and self.n_candidate is not None) else None,
         }
 

@@ -7,6 +7,7 @@ from transformers.trainer import Trainer
 from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers import EvalPrediction
 from typing import Dict, List, Optional, Tuple, Union, Any
+from torch.utils.data import Dataset
 import wandb
 
 class RerankerTrainer(Trainer):
@@ -24,6 +25,14 @@ class RerankerTrainer(Trainer):
             super().save_model(output_dir)
             model = self.model.module if hasattr(self.model, "module") else self.model
             torch.save(model.args, os.path.join(output_dir, "config.bin"))
+
+    def predict(
+        self,
+        test_dataset: Dataset,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "test"
+    ):
+        return super().predict(test_dataset, ignore_keys, metric_key_prefix)
 
 class FiDTrainer(Seq2SeqTrainer):
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -108,7 +117,7 @@ class FiDTrainer(Seq2SeqTrainer):
 
 def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
     preds, labels = eval_pred # pred_scores [batch_size, n_candidates], scores [batch_size, n_candidates, n_tasks]
-    select_process = preds # [batch_size, n_candidates]
+    select_process, consistencies, ranks_acc_dist = preds
     scores = labels # [batch_size, n_candidates, n_tasks]
     sum_scores = np.sum(scores, axis=-1) # [batch_size, n_candidates]
     batch_size, n_candidates, n_tasks = scores.shape
@@ -135,6 +144,7 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
     oracle_best_scores = scores[np.arange(batch_size), np.argmax(sum_scores, axis=-1)]
 
 
+
     metrics = {
         "sel": {
             "acc": np.mean(accs),
@@ -147,8 +157,17 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
             "rouge2": np.mean(oracle_best_scores[:, 1]),
             "rougeL": np.mean(oracle_best_scores[:, 2]),
         },
-        "dev_score": np.mean(pred_best_scores[:, 1]), # dev score used for save checkpoint
+        "dev_score": np.mean(pred_best_scores[:, 1]), # dev score used for save checkpoint,
+        "consistency_mean": np.mean(consistencies),
+        "conssitency_std": np.std(consistencies),
     }
+
+    ranks_acc_dist = np.sum(ranks_acc_dist, axis=0)
+    ranks_acc_dist_sum = np.clip(np.sum(ranks_acc_dist, axis=-1), 1e-6, None) # in case of 0
+    ranks_acc = ranks_acc_dist[:, 0] / ranks_acc_dist_sum
+    metrics.update({
+        f"rank_{i}_acc": ranks_acc[i] for i in range(len(ranks_acc))
+    })
     return metrics
 
 

@@ -2,9 +2,6 @@ import torch
 import os
 import numpy as np
 import torch.nn.functional as F
-import transformers
-from dualfid.data import Dataset
-from transformers import TrainingArguments, Trainer, WEIGHTS_NAME, CONFIG_NAME
 from dualfid.reranker import (
     SCR,
     DualReranker,
@@ -34,6 +31,7 @@ from transformers import (
     BartForConditionalGeneration,
 )
 from transformers.models.roberta.modeling_roberta import RobertaModel
+from transformers.models.deberta.modeling_deberta import DebertaModel
 
 
 def build_pretrained_model(model_type, model_name, cache_dir=None):
@@ -50,6 +48,10 @@ def build_pretrained_model(model_type, model_name, cache_dir=None):
     elif model_type.startswith("bart"):
         print("\nUsing BART model")
         model = BartForConditionalGeneration.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("deberta"):
+        print("\nUsing DeBERTa model")
+        from transformers import DebertaModel
+        model = DebertaModel.from_pretrained(model_name, cache_dir = cache_dir)
     return model
 
 def build_tokenizer(model_type, model_name, cache_dir=None):
@@ -70,22 +72,27 @@ def build_tokenizer(model_type, model_name, cache_dir=None):
         print("\nUsing BART tokenizer")
         from transformers import BartTokenizerFast
         tokenizer = BartTokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("deberta"):
+        print("\nUsing DeBERTa tokenizer")
+        from transformers import DebertaTokenizer
+        tokenizer = DebertaTokenizer.from_pretrained(model_name, cache_dir = cache_dir)
     return tokenizer
 
-def build_reranker(reranker_type, model_type, model_name, cache_dir, config):
+def build_reranker(reranker_type, model_type, model_name, cache_dir, config, tokenizer=None):
     reranker = None
     pretrained_model = build_pretrained_model(model_type, model_name, cache_dir)
+    pretrained_model.resize_token_embeddings(config["new_num_tokens"])
 
     if reranker_type == "scr":
-        reranker = SCR(pretrained_model, config)
+        reranker = SCR(pretrained_model, config, tokenizer)
     elif reranker_type == "dual":
-        reranker = DualReranker(pretrained_model, config)
+        reranker = DualReranker(pretrained_model, config, tokenizer)
     elif reranker_type == "crosscompare":
-        reranker = CrossCompareReranker(pretrained_model, config)
+        reranker = CrossCompareReranker(pretrained_model, config, tokenizer)
     elif reranker_type == "dualcompare":
-        reranker = DualCompareReranker(pretrained_model, config)
+        reranker = DualCompareReranker(pretrained_model, config, tokenizer)
     elif reranker_type == "comparegen":
-        reranker = CompareGenReranker(pretrained_model, config)
+        reranker = CompareGenReranker(pretrained_model, config, tokenizer)
 
     return reranker
 
@@ -117,20 +124,29 @@ def build_fid(fid_type, model_type, model_name, cache_dir, config):
 
     return fid
 
-def build_collator(model_type:str):
+def build_collator(
+    model_type:str,
+    tokenizer,
+    source_max_length:int,
+    candidate_max_length:int,
+    source_prefix:str = None,
+    candidate1_prefix:str = None,
+    candidate2_prefix:str = None,
+    ):
     if model_type == "fid":
-        return FiDCollator
+        return FiDCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
     elif model_type == "dualfid":
-        return DualFiDCollator
+        return DualFiDCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
     elif model_type == "scr":
-        return SCRCollator
+        return SCRCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
     elif model_type == "dual":
-        return DualCollator
+        return DualCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
     elif model_type == "crosscompare":
-        return CrossCompareCollator
+        return CrossCompareCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix, candidate2_prefix)
     elif model_type == "dualcompare":
-        return DualCompareCollator
+        return DualCompareCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
     elif model_type == "t5comparegen":
-        return CompareGenCollator
+        return CompareGenCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix, candidate2_prefix)
     else:
         raise ValueError(f"model_type {model_type} not supported")
+

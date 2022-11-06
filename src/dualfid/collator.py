@@ -56,7 +56,15 @@ def get_truncated_text(texts, tokenizer, max_length):
     return truncated_texts
 
 class SCRCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate_prefix=None,
+        postfix=None
+    ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
@@ -68,6 +76,8 @@ class SCRCollator(object):
         self.separate_token = self.sep_token
         self.postfix = postfix
         self.target_maxlength = self.candidate_maxlength
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate_prefix = candidate_prefix if candidate_prefix is not None else "<candidate>"
 
 
     def __call__(self, batch):
@@ -82,11 +92,11 @@ class SCRCollator(object):
         batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
 
         if self.postfix is not None:
-            source_texts = [[self.separate_token.join([s, c, self.postfix]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
-            target_texts = [self.separate_token.join([s, t, self.postfix]) for s, t in zip(batch_source, batch_target)]
+            source_texts = [[self.separate_token.join([self.source_prefix+s, self.candidate_prefix+c, self.postfix]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and candidate
+            target_texts = [self.separate_token.join([self.source_prefix+s, self.candidate_prefix+t, self.postfix]) for s, t in zip(batch_source, batch_target)]
         else:
-            source_texts = [[self.separate_token.join([s, c]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and target
-            target_texts = [self.separate_token.join([s, t]) for s, t in zip(batch_source, batch_target)]
+            source_texts = [[self.separate_token.join([self.source_prefix+s, self.candidate_prefix+c, c]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and target
+            target_texts = [self.separate_token.join([self.source_prefix+s, self.candidate_prefix+t]) for s, t in zip(batch_source, batch_target)]
 
         encoded_source_text_ids, encoded_source_text_masks = encode_batch_text(source_texts, self.tokenizer, self.tokenizer.model_max_length) # source
         encoded_target_text_ids, encoded_target_text_masks = encode_texts(target_texts, self.tokenizer, self.tokenizer.model_max_length) # target
@@ -101,7 +111,14 @@ class SCRCollator(object):
         }
 
 class DualCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate_prefix=None,
+    ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
@@ -112,6 +129,10 @@ class DualCollator(object):
         self.cls_token = self.cls_token if self.cls_token is not None else ""
         self.separate_token = self.sep_token + ' ' + self.cls_token # used to separate 2 concatenated texts
         self.target_maxlength = self.candidate_maxlength
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate_prefix = candidate_prefix if candidate_prefix is not None else "<candidate>"
+
+        tokenizer.add_tokens([self.source_prefix, self.candidate_prefix])
 
 
     def __call__(self, batch):
@@ -121,10 +142,15 @@ class DualCollator(object):
         batch_candidates = [b['candidates'] for b in batch]
         batch_scores = [b['scores'] for b in batch]
 
+        # add prefix
+        batch_source = [self.source_prefix + s for s in batch_source]
+        batch_candidates = [[self.candidate_prefix + c for c in cands] for cands in batch_candidates]
+        batch_target = [self.candidate_prefix + t for t in batch_target]
+        # truncate
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
         batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
-
+        # tokenize
         encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.tokenizer.model_max_length) # source
         encoded_target_ids, encoded_target_masks = encode_texts(batch_target, self.tokenizer, self.tokenizer.model_max_length) # target
         encoded_candidate_ids, encoded_candidate_masks = encode_batch_text(batch_candidates, self.tokenizer, self.tokenizer.model_max_length) # candidates
@@ -140,7 +166,16 @@ class DualCollator(object):
         }
 
 class CrossCompareCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate1_prefix=None,
+        candidate2_prefix=None,
+        postfix=None
+    ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
@@ -151,6 +186,12 @@ class CrossCompareCollator(object):
         self.separate_token = self.sep_token
         self.postfix = postfix
         self.target_maxlength = self.candidate_maxlength
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate1_prefix = candidate1_prefix if candidate1_prefix is not None else "<candidate1>"
+        self.candidate2_prefix = candidate2_prefix if candidate2_prefix is not None else "<candidate2>"
+
+        # add prefix
+        tokenizer.add_tokens([self.source_prefix, self.candidate1_prefix, self.candidate2_prefix]) # debug
 
 
     def __call__(self, batch):
@@ -175,13 +216,13 @@ class CrossCompareCollator(object):
             for i in range(n_candidate):
                 for j in range(n_candidate):
                     if self.postfix is not None:
-                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([batch_source[bz], batch_candidates[bz][i], batch_candidates[bz][j], self.postfix])
+                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j], self.postfix])
                     else:
-                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([batch_source[bz], batch_candidates[bz][i], batch_candidates[bz][j]])
+                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j]])
                 if target_rand_mat[bz][i]:
-                    batch_cand_target_pairs[bz][i] = self.separate_token.join([batch_candidates[bz][i], batch_target[bz]])
+                    batch_cand_target_pairs[bz][i] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_target[bz]])
                 else:
-                    batch_cand_target_pairs[bz][i] = self.separate_token.join([batch_target[bz], batch_candidates[bz][i]])
+                    batch_cand_target_pairs[bz][i] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_target[bz], self.candidate2_prefix+batch_candidates[bz][i]])
 
         encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.tokenizer.model_max_length) # source
         encoded_cand_target_ids, encoded_cand_target_masks = encode_batch_text(batch_cand_target_pairs, self.tokenizer, self.tokenizer.model_max_length) # candidates
@@ -207,7 +248,16 @@ class CrossCompareCollator(object):
         }
 
 class DualCompareCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate1_prefix=None,
+        candidate2_prefix=None,
+        postfix=None
+    ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
@@ -218,11 +268,17 @@ class DualCompareCollator(object):
         self.separate_token = self.sep_token
         self.postfix = postfix
         self.target_maxlength = self.candidate_maxlength
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate1_prefix = candidate1_prefix if candidate1_prefix is not None else "<candidate1>"
+        self.candidate2_prefix = candidate2_prefix if candidate2_prefix is not None else "<candidate2>"
+
+        # add special tokens for each prefix
+        tokenizer.add_tokens([self.source_prefix, self.candidate1_prefix, self.candidate2_prefix])
 
 
     def __call__(self, batch):
         batch_size = len(batch)
-        batch_source = [b['source'] for b in batch]
+        batch_source = [self.source_prefix+b['source'] for b in batch] # add source prefix
         batch_target = [b['target'] for b in batch]
         batch_candidates = [b['candidates'] for b in batch]
         batch_scores = [b['scores'] for b in batch]
@@ -242,13 +298,13 @@ class DualCompareCollator(object):
             for i in range(n_candidate):
                 for j in range(n_candidate):
                     if self.postfix is not None:
-                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([batch_candidates[bz][i], batch_candidates[bz][j], self.postfix])
+                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j], self.postfix])
                     else:
-                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([batch_candidates[bz][i], batch_candidates[bz][j]])
+                        batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j]])
                 if target_rand_mat[bz][i]:
-                    batch_cand_target_pairs[bz][i] = self.separate_token.join([batch_candidates[bz][i], batch_target[bz]])
+                    batch_cand_target_pairs[bz][i] = self.separate_token.join([self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_target[bz]])
                 else:
-                    batch_cand_target_pairs[bz][i] = self.separate_token.join([batch_target[bz], batch_candidates[bz][i]])
+                    batch_cand_target_pairs[bz][i] = self.separate_token.join([self.candidate1_prefix+batch_target[bz], self.candidate2_prefix+batch_candidates[bz][i]])
 
         encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.tokenizer.model_max_length) # source
         encoded_cand_target_ids, encoded_cand_target_masks = encode_batch_text(batch_cand_target_pairs, self.tokenizer, self.tokenizer.model_max_length) # candidates
@@ -275,7 +331,16 @@ class DualCompareCollator(object):
 
 
 class CompareGenCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength, postfix=None):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate1_prefix=None,
+        candidate2_prefix=None,
+        postfix=None
+    ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
@@ -286,11 +351,17 @@ class CompareGenCollator(object):
         self.separate_token = self.sep_token
         self.postfix = postfix
         self.target_maxlength = self.candidate_maxlength
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate1_prefix = candidate1_prefix if candidate1_prefix is not None else "<candidate1>"
+        self.candidate2_prefix = candidate2_prefix if candidate2_prefix is not None else "<candidate2>"
+
+        # add special tokens for each prefix
+        tokenizer.add_tokens([self.source_prefix, self.candidate1_prefix, self.candidate2_prefix])
 
 
     def __call__(self, batch):
         batch_size = len(batch)
-        batch_source = [b['source'] for b in batch]
+        batch_source = [self.source_prefix+b['source'] for b in batch] # add source prefix
         batch_target = [b['target'] for b in batch]
         batch_candidates = [b['candidates'] for b in batch]
         batch_scores = [b['scores'] for b in batch]
@@ -304,7 +375,7 @@ class CompareGenCollator(object):
         random_idxs2 = random_idxs1.roll(1)
         if self.postfix is not None:
             batch_candidate_pairs = [
-                [self.separate_token.join(s, cands[i], cands[j], self.postfix) for i, j in zip(random_idxs1, random_idxs2)]
+                [self.separate_token.join([s, self.candidate1_prefix+cands[i], self.candidate2_prefix+cands[j], self.postfix]) for i, j in zip(random_idxs1, random_idxs2)]
                 for s, cands in zip(batch_source, batch_candidates)
             ]
             batch_candidate_pair_targets = [
@@ -312,7 +383,7 @@ class CompareGenCollator(object):
                 for bz, cands in enumerate(batch_candidates)
             ]
             batch_cand_target_pairs = [
-                [self.separate_token.join(cands[i], t, self.postfix) for i in range(n_candidate)]
+                [self.separate_token.join([cands[i], t, self.postfix]) for i in range(n_candidate)]
                 for cands, t in zip(batch_candidates, batch_target)
             ]
             batch_cand_target_pair_targets = batch_target
@@ -349,10 +420,25 @@ class CompareGenCollator(object):
 
 
 class DualFiDCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate_prefix=None,
+        ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
+        self.sep_token = tokenizer.sep_teos_token if tokenizer.sep_token is not None else tokenizer.eos_token
+        self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
+        assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
+        self.separate_token = self.sep_token
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate_prefix = candidate_prefix if candidate_prefix is not None else "<candidate>"
+
+        tokenizer.add_tokens([self.source_prefix, self.candidate_prefix])
 
     def __call__(self, batch):
         assert(batch[0]['target'] != None)
@@ -368,7 +454,7 @@ class DualFiDCollator(object):
         target_mask = target["attention_mask"].bool()
         target_ids = target_ids.masked_fill(~target_mask, -100)
         # encode source text
-        source = [ex['source'] for ex in batch]
+        source = [self.source_prefix+ex['source'] for ex in batch]
         source = self.tokenizer.batch_encode_plus(
             source,
             max_length=self.source_maxlength,
@@ -379,7 +465,7 @@ class DualFiDCollator(object):
         source_ids = source["input_ids"]
         source_mask = source["attention_mask"].bool()
         # encode candidate text
-        candidate_texts = [example['candidates'] for example in batch]
+        candidate_texts = [self.candidate_prefix+example['candidates'] for example in batch]
         candidate_ids, candidate_masks = encode_batch_text(candidate_texts,
                                                      self.tokenizer,
                                                      self.source_maxlength)
@@ -398,10 +484,26 @@ class DualFiDCollator(object):
         }
 
 class FiDCollator(object):
-    def __init__(self, source_maxlength, tokenizer, candidate_maxlength):
+    def __init__(
+        self,
+        source_maxlength,
+        tokenizer,
+        candidate_maxlength,
+        source_prefix=None,
+        candidate_prefix=None,
+        ):
         self.tokenizer = tokenizer
         self.source_maxlength = source_maxlength
         self.candidate_maxlength = candidate_maxlength
+        self.sep_token = tokenizer.sep_teos_token if tokenizer.sep_token is not None else tokenizer.eos_token
+        self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
+        assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
+        self.separate_token = self.sep_token
+        self.source_prefix = source_prefix if source_prefix is not None else "<source>"
+        self.candidate_prefix = candidate_prefix if candidate_prefix is not None else "<candidate>"
+
+        # add tokens to the tokenizer
+        self.tokenizer.add_tokens([self.source_prefix, self.candidate_prefix])
 
     def __call__(self, batch):
         assert(batch[0]['target'] != None)
@@ -418,7 +520,7 @@ class FiDCollator(object):
         target_ids = target_ids.masked_fill(~target_mask, -100)
         # encode FiD texts
         def append_candidates(example):
-            return [example['source'] + " " + candidate for candidate in example['candidates']]
+            return [self.source_prefix+example['source']+self.candidate_prefix+candidate for candidate in example['candidates']]
         texts = [append_candidates(example) for example in batch]
         context_ids, context_masks = encode_batch_text(texts,
             self.tokenizer,
