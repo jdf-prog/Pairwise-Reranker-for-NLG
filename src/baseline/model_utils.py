@@ -21,9 +21,12 @@ def build_tokenizer(args):
     elif args.model_type.startswith("opus-mt"):
         print("\nUsing OPUS MT tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir = args.cache_dir)
-
+    elif args.model_type.startswith("flan-t5"):
+        print("\nUsing Flan-T5 tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir = args.cache_dir)
+    else:
+        raise ValueError("Invalid model type")
     return tokenizer
-
 
 def build_model(args):
     model = None
@@ -39,6 +42,11 @@ def build_model(args):
     elif args.model_type.startswith("opus-mt"):
         print("\nUsing OPUS MT model")
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model, cache_dir = args.cache_dir)
+    elif args.model_type.startswith("flan-t5"):
+        print("\nUsing Flan-T5 model")
+        model = AutoModelForSeq2SeqLM.from_pretrained(args.model, cache_dir = args.cache_dir)
+    else:
+        raise ValueError("Invalid model type")
 
     return model
 

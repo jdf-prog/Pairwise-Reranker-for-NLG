@@ -52,6 +52,10 @@ def build_pretrained_model(model_type, model_name, cache_dir=None):
         print("\nUsing DeBERTa model")
         from transformers import DebertaModel
         model = DebertaModel.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("xlm-roberta"):
+        print("\nUsing XLM-RoBERTa model")
+        from transformers import XLMRobertaModel
+        model = XLMRobertaModel.from_pretrained(model_name, cache_dir = cache_dir)
     return model
 
 def build_tokenizer(model_type, model_name, cache_dir=None):
@@ -76,6 +80,10 @@ def build_tokenizer(model_type, model_name, cache_dir=None):
         print("\nUsing DeBERTa tokenizer")
         from transformers import DebertaTokenizer
         tokenizer = DebertaTokenizer.from_pretrained(model_name, cache_dir = cache_dir)
+    elif model_type.startswith("xlm-roberta"):
+        print("\nUsing XLM-RoBERTa tokenizer")
+        from transformers import XLMRobertaTokenizerFast
+        tokenizer = XLMRobertaTokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
     return tokenizer
 
 def build_reranker(reranker_type, model_type, model_name, cache_dir, config, tokenizer=None):

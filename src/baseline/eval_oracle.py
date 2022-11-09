@@ -14,7 +14,8 @@ from common.data import (
     get_candidate_types,
     get_candidate_metrics,
     load_pkl_sources_and_targets,
-    load_prepared_dataset
+    load_prepared_dataset,
+    save_prepared_dataset
 )
 from common.dataset import (
     CustomDataset,
@@ -24,7 +25,8 @@ from common.utils import (
     str2bool,
 )
 from common.evaluation import (
-    overall_eval
+    overall_eval,
+    SUPPORTED_METRICS
 )
 from pathlib import Path
 
@@ -34,13 +36,10 @@ def main(args):
     seed_everything(args.seed)
 
     # prepare metrics
-    metrics = []
-    if args.eval_rouge:
-        metrics.extend(["rouge1", "rouge2", "rougeL", "rougeLsum"])
-    if args.eval_bleu:
-        metrics.extend(["bleu"])
-    if args.eval_bleurt:
-        metrics.extend(["bleurt"])
+    if 'rouge' in args.metrics:
+        args.metrics.extend(["rouge1", "rouge2", "rougeL", "rougeLsum"])
+        args.metrics.remove('rouge')
+    metrics = args.metrics
 
     # model and generation_method of current computed candidates
     types = get_candidate_types(args.dataset, args.set)
@@ -62,6 +61,7 @@ def main(args):
 
     ds = load_prepared_dataset(args.dataset, args.set)
     ds.analyze_oracle()
+    save_prepared_dataset(args.dataset, args.set, ds)
 
 
 
@@ -72,9 +72,10 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=1)
     # metrics
-    parser.add_argument('--eval_rouge', type = str2bool, default = True)
-    parser.add_argument('--eval_bleu', type = str2bool, default = True)
-    parser.add_argument('--eval_bleurt', type = str2bool, default = False)
+    parser.add_argument("--metrics", type=str, default="rouge,bleu",
+        help="metrics to compute, support rouge, bleu, bleurt, cider, spice")
     args = parser.parse_args()
+    args.metrics = args.metrics.split(",")
+    assert set(args.metrics).issubset(set(SUPPORTED_METRICS)), "Unsupported metrics: {}".format(args.metrics)
     print(args)
     main(args)

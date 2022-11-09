@@ -116,8 +116,13 @@ class FiDTrainer(Seq2SeqTrainer):
 #     return metrics
 
 def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
-    preds, labels = eval_pred # pred_scores [batch_size, n_candidates], scores [batch_size, n_candidates, n_tasks]
-    select_process, consistencies, ranks_acc_dist = preds
+    """
+    Compute metrics for the model.
+    Args:
+
+    """
+    preds, labels = eval_pred # scores [batch_size, n_candidates, n_tasks]
+    select_process, ranks_acc_dist, ranks_consistency_dist = preds
     scores = labels # [batch_size, n_candidates, n_tasks]
     sum_scores = np.sum(scores, axis=-1) # [batch_size, n_candidates]
     batch_size, n_candidates, n_tasks = scores.shape
@@ -143,8 +148,6 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
     pred_best_scores = scores[np.arange(batch_size), pred_best_idx]
     oracle_best_scores = scores[np.arange(batch_size), np.argmax(sum_scores, axis=-1)]
 
-
-
     metrics = {
         "sel": {
             "acc": np.mean(accs),
@@ -158,11 +161,22 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
             "rougeL": np.mean(oracle_best_scores[:, 2]),
         },
         "dev_score": np.mean(pred_best_scores[:, 1]), # dev score used for save checkpoint,
-        "consistency_mean": np.mean(consistencies),
-        "conssitency_std": np.std(consistencies),
     }
 
-    ranks_acc_dist = np.sum(ranks_acc_dist, axis=0)
+    num_consistency = np.sum(ranks_consistency_dist[:,:,0], dtype=np.int32).item()
+    num_in_consistency = np.sum(ranks_consistency_dist[:,:,1], dtype=np.int32).item()
+    metrics['consistency_mean'] = np.mean(
+        [1] * num_consistency + [0] * num_in_consistency
+    )
+    metrics['consistency_std'] = np.std(
+        [1] * num_consistency + [0] * num_in_consistency
+    )
+    reduced_ranks_consistency_dist = np.sum(ranks_consistency_dist, axis=0) # [n_candidates]
+    consistency_mean_per_rank = reduced_ranks_consistency_dist[:, 0] / np.clip(np.sum(reduced_ranks_consistency_dist, axis=-1), 1e-6, None)
+    metrics.update({
+        f"ranks_{i}_consistency": consistency_mean_per_rank[i] for i in range(len(consistency_mean_per_rank))
+    })
+    ranks_acc_dist = np.sum(ranks_acc_dist, axis=0) # [n_candidates, 2]
     ranks_acc_dist_sum = np.clip(np.sum(ranks_acc_dist, axis=-1), 1e-6, None) # in case of 0
     ranks_acc = ranks_acc_dist[:, 0] / ranks_acc_dist_sum
     metrics.update({

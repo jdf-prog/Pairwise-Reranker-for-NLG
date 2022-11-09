@@ -16,7 +16,6 @@ from typing import Counter, List, Dict, Tuple, Union, Optional, Set
 from collections import Counter
 from common.evaluation import (
     overall_eval,
-    overall_eval_multi_process,
     SUPPORTED_METRICS,
 )
 class CustomDataset:

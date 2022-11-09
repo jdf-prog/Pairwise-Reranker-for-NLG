@@ -156,15 +156,6 @@ def load_prepared_dataset(dataset_name, set_name, models:list=None, generation_m
     ds.self_check()
     return ds
 
-    # cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
-    # ds_path = cur_folder.parent.parent / 'data' / 'prepared' / dataset_name / set_name / 'dataset.jsonl'
-    # if not ds_path.exists():
-    #     sources, targets = load_pkl_sources_and_targets(dataset_name, set_name)
-    #     ds = CustomDataset.from_raw(sources, targets)
-    # else:
-    #     ds = CustomDataset.from_jsonl(ds_path)
-    # return ds
-
 def save_prepared_dataset(dataset_name, set_name, dataset: CustomDataset):
     """
         Save the computed and prepared dataset

@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 import argparse
+from typing import List, Union
 def seed_everything(seed=42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)

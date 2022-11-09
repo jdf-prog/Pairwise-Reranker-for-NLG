@@ -41,18 +41,19 @@ parser.add_argument('--debug', type = str2bool, default = False)
 parser.add_argument('--debug_size', type = int, default = 10)
 
 # data
-parser.add_argument('--dataset', type=str, default = "reddit",
-                    choices= ["cnndm", "xsum", "reddit", 'wmt18'])
+parser.add_argument('--dataset', type=str, default = "cnndm",
+                    choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
 
 # model
 parser.add_argument('--model_type', type = str, default = "pegasus",
-                    choices=["pegasus", "bart", "opus-mt"])
+                    choices=["pegasus", "bart", "opus-mt", "t5", "flan-t5"])
 parser.add_argument('--model', type = str, default = "google/pegasus-large",
                     choices = ["google/pegasus-large", "google/pegasus-cnn_dailymail", "google/pegasus-xsum",
                     "facebook/bart-large", "facebook/bart-large-cnn", "facebook/bart-large-xsum",
                     "Helsinki-NLP/opus-mt-zh-en", "Helsinki-NLP/opus-mt-de-en", "Helsinki-NLP/opus-mt-it-en",
                     "facebook/nllb-200-3.3B", "facebook/nllb-200-1.3B", "facebook/nllb-200-distilled-1.3B", "facebook/nllb-200-distilled-600M",
-                    "facebook/m2m100_1.2B", "facebook/m2m100_418M"])
+                    "facebook/m2m100_1.2B", "facebook/m2m100_418M",
+                    "mrm8488/t5-base-finetuned-common_gen", "google/flan-t5-large", "sibyl/BART-large-commongen"])
 parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1",
                     choices = ["pegasus_unsupervised", "bart_unsupervised",
                     "pegasus_cnndm_first_half_shuffled_1", "pegasus_cnndm_second_half_shuffled_1", "pegasus_cnndm",
@@ -61,7 +62,8 @@ parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1"
                     "bart_xsum_first_half_shuffled_1", "bart_xsum_second_half_shuffled_1", "bart_xsum",
                     "pegasus_reddit_first_half_shuffled_1", "pegasus_reddit_second_half_shuffled_1", "pegasus_reddit_train_1",
                     "bart_reddit_first_half_shuffled_1", "bart_reddit_second_half_shuffled_1", "bart_reddit_train_1",
-                    "opus_mt", "nllb", "m2m100"])
+                    "opus_mt", "nllb", "m2m100",
+                    'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen'])
 parser.add_argument('--load_model', type = str2bool, default = False)
 parser.add_argument('--load_model_path', type = str,
                     default = "../base_model_finetuning/ft_saved_models/reddit/pegasus_reddit_train_1/checkpoint-5/pytorch_model.bin") # todo: change to where you saved the finetuned checkpoint
@@ -84,16 +86,16 @@ parser.add_argument('--stemmer', type = str2bool, default = True)
 
 args = parser.parse_args()
 
-dataset_names = ["cnndm", "xsum", "reddit", 'wmt18']
-val_data_sizes = [13368, 11332, 4213, 2001]
-test_data_sizes = [11490, 11334, 4222, 3981]
-source_max_lengths = [1024, 512, 512, 512] # debug
-candidate_max_lengths = [128, 64, 128, 350]
-clean_ns = [True, False, False, False]
-length_penalties_pegasus = [0.8, 0.8, 0.6, 0.8]
-length_penalties_bart = [0.8, 0.8, 1.0, 0.8]
-repetition_penalties = [1.0, 1.0, 1.0, 1.0]
-no_repeat_ngram_sizes = [0, 3, 3, 0]
+dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
+val_data_sizes = [13368, 11332, 4213, 2001, 4018]
+test_data_sizes = [11490, 11334, 4222, 3981, 1497]
+source_max_lengths = [1024, 512, 512, 512, 10] # debug
+candidate_max_lengths = [128, 64, 128, 350, 35]
+clean_ns = [True, False, False, False, False]
+length_penalties_pegasus = [0.8, 0.8, 0.6, 0.8, 0.8]
+length_penalties_bart = [0.8, 0.8, 1.0, 0.8, 0.8]
+repetition_penalties = [1.0, 1.0, 1.0, 1.0, 1.0]
+no_repeat_ngram_sizes = [0, 3, 3, 0, 0]
 
 idx = dataset_names.index(args.dataset)
 
@@ -104,8 +106,9 @@ if args.model_type == "pegasus":
     args.length_penalty = length_penalties_pegasus[idx]
 elif args.model_type == "bart":
     args.length_penalty = length_penalties_bart[idx]
-elif args.model_type == "opus-mt":
+else:
     args.length_penalty = 1.0
+
 args.repetition_penalty = repetition_penalties[idx]
 args.no_repeat_ngram_size = no_repeat_ngram_sizes[idx]
 args.cache_dir = "../../hf_models/" + args.model.split('/')[-1] + "/"

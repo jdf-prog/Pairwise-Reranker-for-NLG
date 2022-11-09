@@ -1,13 +1,17 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
+#SBATCH --time=36:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ./jobs/%j.out
+#SBATCH --nodelist=ink-titan
 #SBATCH --gres=gpu:6000:1
-#SBATCH --qos=general
 #SBATCH -n 1
 
-train_data_path="./data/prepared/cnndm/val/dataset_train.jsonl"
-dev_data_path="./data/prepared/cnndm/val/dataset_val_min.jsonl"
+# train_data_path="./data/prepared/cnndm/val/dataset_train.jsonl"
+# dev_data_path="./data/prepared/cnndm/val/dataset_val_min.jsonl"
+# test_data_path="./data/prepared/cnndm/test/dataset.jsonl"
+
+train_data_path="./data/prepared/cnndm/train/dataset.jsonl"
+dev_data_path="./data/prepared/cnndm/val/dataset.jsonl"
 test_data_path="./data/prepared/cnndm/test/dataset.jsonl"
 
 nvidia-smi
@@ -119,7 +123,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_curriculum_poisson" \
+    --run_name "debug_2_pos_2_neg_train_set" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -128,23 +132,27 @@ train_reranker.py \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 16 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 64 \
+    --gradient_accumulation_steps 8 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
-    --num_pos 10 \
-    --num_neg 10 \
-    --evaluation_strategy "steps" \
-    --save_strategy "steps" \
-    --eval_steps 100 \
-    --save_steps 100 \
-    --sub_sampling_mode "poisson_dynamic" \
+    --num_pos 2 \
+    --num_neg 2 \
+    --loss_type "BCE" \
+    --sub_sampling_mode "top_bottom" \
+    # --evaluation_strategy "steps" \
+    # --save_strategy "steps" \
+    # --eval_steps 100 \
+    # --save_steps 100 \
+    # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_mean/checkpoint-best" \
     # --do_train False \
     # --do_eval False \
     # --do_predict True \
     # --evaluate_first_step True \
+
+
 
 
 

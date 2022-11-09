@@ -10,10 +10,13 @@ from tqdm import tqdm
 from nltk import sent_tokenize
 from rouge_score import rouge_scorer
 from tqdm.contrib.concurrent import process_map
+from pycocoevalcap.spice.spice import Spice
+from pycocoevalcap.cider.cider import Cider
+from pycocoevalcap.tokenizer.ptbtokenizer import PTBTokenizer
 logging.set_verbosity(logging.WARNING)
 
 
-SUPPORTED_METRICS = ['rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bleu', 'bleurt']
+SUPPORTED_METRICS = ['rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bleu', 'bleurt', "cider", "spice"]
 
 def pre_rouge_processing(summary):
     summary = summary.replace("<n>", " ")
@@ -115,6 +118,85 @@ def eval_bleurt(
         bleurt_scores = [score[0] for score in bleurt_scores]
     return bleurt_scores
 
+def eval_cider(
+    hypotheses: Union[List[List[str]], List[str]],
+    references: List[str]
+    ) -> List[float]:
+    """
+    Evaluate the hypothesis and reference using the metric.
+
+    Args:
+        hypotheses: the hypotheses
+        references: the references
+    """
+    print("Evaluating cider")
+    assert len(hypotheses) == len(references)
+    for i in range(len(hypotheses)):
+        if isinstance(hypotheses[i], str):
+            hypotheses[i] = [hypotheses[i]]
+    cider_scorer = Cider()
+    gts = {}
+    res = {}
+    hypo_ids_per_ref = []
+    id = 0
+
+    for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
+        hypo_ids_per_ref.append([])
+        for hypo in hypo_group:
+            gts[id] = [{"caption": ref}]
+            res[id] = [{"caption": hypo}]
+            hypo_ids_per_ref[i].append(id)
+            id += 1
+    tokenizer = PTBTokenizer()
+    gts = tokenizer.tokenize(gts)
+    res = tokenizer.tokenize(res)
+    score, scores = cider_scorer.compute_score(gts, res)
+    cider_scores = [[scores[hypo_id] for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
+    # nested remove list with single element
+    if all([len(score) == 1 for score in cider_scores]):
+        cider_scores = [score[0] for score in cider_scores]
+    return cider_scores
+
+def eval_spice(
+    hypotheses: Union[List[List[str]], List[str]],
+    references: List[str]
+    ) -> List[float]:
+    """
+    Evaluate the hypothesis and reference using the metric.
+
+    Args:
+        hypotheses: the hypotheses
+        references: the references
+    """
+    print("Evaluating spice")
+    assert len(hypotheses) == len(references)
+    for i in range(len(hypotheses)):
+        if isinstance(hypotheses[i], str):
+            hypotheses[i] = [hypotheses[i]]
+    spice_scorer = Spice()
+    gts = {}
+    res = {}
+    hypo_ids_per_ref = []
+    id = 0
+
+    for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
+        hypo_ids_per_ref.append([])
+        for hypo in hypo_group:
+            gts[id] = [{"caption": ref}]
+            res[id] = [{"caption": hypo}]
+            hypo_ids_per_ref[i].append(id)
+            id += 1
+    tokenizer = PTBTokenizer()
+    gts = tokenizer.tokenize(gts)
+    res = tokenizer.tokenize(res)
+    score, scores = spice_scorer.compute_score(gts, res)
+    spice_scores = [[scores[hypo_id]['All']['f'] for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
+    # nested remove list with single element
+    if all([len(score) == 1 for score in spice_scores]):
+        spice_scores = [score[0] for score in spice_scores]
+    return spice_scores
+
+
 def _overall_eval_multi_process(data):
     candidates, targets, metrics = data
     s = psutil.Process(os.getpid())
@@ -134,6 +216,12 @@ def _overall_eval(candidates, targets, metrics:List[str]):
     if 'bleurt' in metrics:
         bleurt_scores = eval_bleurt(candidates, targets)
         scores.update({'bleurt': bleurt_scores})
+    if 'cider' in metrics:
+        cider_scores = eval_cider(candidates, targets)
+        scores.update({'cider': cider_scores})
+    if 'spice' in metrics:
+        spice_scores = eval_spice(candidates, targets)
+        scores.update({'spice': spice_scores})
     return scores
 
 def overall_eval(

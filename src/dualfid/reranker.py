@@ -512,9 +512,10 @@ class CrossCompareReranker(nn.Module):
             poisson_rate_update_steps = self.args['training_data_size'] // self.args['n_candidates']
             poisson_rate = self.args['training_steps'] // poisson_rate_update_steps + 1
             poisson_rate = max(poisson_rate, 1)
+            # print(poisson_rate_update_steps) # debug
             # print(f"poisson_rate: {poisson_rate}") # debug
             poisson_sampling_dif_ranks = torch.clip(
-                torch.poisson(torch.ones(batch_size, n_pair) * poisson_rate), 0, self.args['n_candidates'] - 1
+                torch.poisson(torch.ones(batch_size, n_pair) * poisson_rate), 1, self.args['n_candidates'] - 1
             ).type(torch.int64).to(device)
             poisson_sampling_dif_ranks = self.args['n_candidates'] - 1 - poisson_sampling_dif_ranks
             # print(f"poisson_sampling_dif_ranks: {poisson_sampling_dif_ranks}") # debug
@@ -523,9 +524,17 @@ class CrossCompareReranker(nn.Module):
                     for j in range(n_pair)] for i in range(batch_size)
             ]).type(torch.int64).to(device)
             neg_idx = pos_idx + poisson_sampling_dif_ranks
+            # print(f"pos_idx: {pos_idx}") # debug
+            # print(f"neg_idx: {neg_idx}") # debug
+            # print(f"sorted_idx: {sorted_idx}") # debug
             pos_idx = sorted_idx.gather(1, pos_idx)
             neg_idx = sorted_idx.gather(1, neg_idx)
+            # print(f"pos_idx: {pos_idx}") # debug
+            # print(f"neg_idx: {neg_idx}") # debug
             # TODO: select unique pairs
+        elif sampling_mode == "self_adaptive":
+            # 3. self adaptive sampling
+            pass
         else:
             raise ValueError(f"Unknown sampling mode: {sampling_mode}")
 
@@ -582,21 +591,24 @@ class CrossCompareReranker(nn.Module):
 
             # NOTE: different loss types
 
-            # 1. triplet ranking loss
-            # dif_scores_sign = torch.sign(dif_scores)
-            # dif_sim = left_sim - right_sim
-            # loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
-
-            # 2. BCE Loss
-            left_labels = (dif_scores > 0).float()
-            right_labels = (dif_scores < 0).float()
-            loss = torch.tensor(0.0, device=device)
-            loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
-            loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
-            loss /= 2
-
-            # # 3. MSE Loss
-            # loss = F.mse_loss(left_sim - right_sim, dif_scores)
+            if self.loss_type == "triplet":
+                # 1. triplet ranking loss
+                dif_scores_sign = torch.sign(dif_scores)
+                dif_sim = left_sim - right_sim
+                loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
+            elif self.loss_type == "BCE":
+                # 2. BCE Loss
+                left_labels = (dif_scores > 0).float()
+                right_labels = (dif_scores < 0).float()
+                loss = torch.tensor(0.0, device=device)
+                loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
+                loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
+                loss /= 2
+            elif self.loss_type == "MSE":
+                # 3. MSE Loss
+                loss = F.mse_loss(left_sim - right_sim, dif_scores)
+            else:
+                raise ValueError(f"Unknown loss type: {self.loss_type}")
 
             # # NOTE: Auxliary Loss: compute target loss
             # pair_idx = torch.randperm(n_candidates, device=device)[:n_pair]
@@ -624,6 +636,10 @@ class CrossCompareReranker(nn.Module):
             sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates]
             ranks = torch.zeros_like(sorted_idx)
             ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidates, device=device)
+            # print("scores", scores)
+            # print("sorted_idx", sorted_idx)
+            # print("ranks", ranks)
+            # print("-"*30)
 
             # NOTE: dofferent comparison order
             permu = torch.randperm(n_candidates).repeat(batch_size, 1).to(device) # [batch_size, n_candidates] random
@@ -637,10 +653,10 @@ class CrossCompareReranker(nn.Module):
             initial_idx = cur_idx
             next_idxs = []
             better_idxs = []
-            consistencies = []
             ranks_acc_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
+            ranks_consistency_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
             for i in range(1, n_candidates):
-                next_idx = permu[:, i]
+                next_idx = permu[:, i] # [batch_size]
                 to_model_ids = candidate_pair_ids[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
                 to_model_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
                 to_model_ids = to_model_ids.view(batch_size, candidate_len)
@@ -658,20 +674,24 @@ class CrossCompareReranker(nn.Module):
                     to_model_ids, to_model_attention_mask,
                 ) # [batch_size]
                 consistency = (((cand1_sim - cand2_sim) * (cand1_sim_ - cand2_sim_)) > 0).float()
-                consistencies.append(consistency)
 
                 # NOTE: compute distribution of the accuracy with different ranks
                 oracle_compare_result = scores[torch.arange(batch_size), cur_idx] - scores[torch.arange(batch_size), next_idx]
                 pair_dif_ranks = ranks[torch.arange(batch_size), cur_idx] - ranks[torch.arange(batch_size), next_idx]
-                for i in range(batch_size):
-                    if (cand1_sim[i] - cand2_sim[i]) * oracle_compare_result[i] > 0:
-                        ranks_acc_dist[i, pair_dif_ranks[i], 0] += 1
+                pair_dif_ranks = torch.abs(pair_dif_ranks)
+                for bz in range(batch_size):
+                    if (cand1_sim[bz] - cand2_sim[bz]) * oracle_compare_result[bz] > 0:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
                     else:
-                        ranks_acc_dist[i, pair_dif_ranks[i], 1] += 1
-                    if (cand1_sim_[i] - cand2_sim_[i]) * oracle_compare_result[i] > 0:
-                        ranks_acc_dist[i, pair_dif_ranks[i], 0] += 1
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
+                    if (cand1_sim_[bz] - cand2_sim_[bz]) * oracle_compare_result[bz] > 0:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
                     else:
-                        ranks_acc_dist[i, pair_dif_ranks[i], 1] += 1
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
+                    if consistency[bz] > 0:
+                        ranks_consistency_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_consistency_dist[bz, pair_dif_ranks[bz], 1] += 1
 
                 better_idx = torch.where(cand1_sim + cand1_sim_ > cand2_sim + cand2_sim_, cur_idx, next_idx)
                 # better_idx = torch.where(cand1_sim >= cand2_sim, cur_idx, next_idx)
@@ -684,8 +704,8 @@ class CrossCompareReranker(nn.Module):
             outputs["select_process"].append(torch.stack(next_idxs, dim=1))
             outputs["select_process"].append(torch.stack(better_idxs, dim=1))
             outputs["select_process"] = torch.stack(outputs["select_process"], dim=1) # [batch_size, 3, n_candidates]
-            outputs["consistency"] = torch.stack(consistencies, dim=1) # [batch_size, n_candidates - 1]
-            outputs["ranks_acc_dist"] = ranks_acc_dist # [n_candidates, 2]
+            outputs["ranks_acc_dist"] = ranks_acc_dist # [batch_size, n_candidates, 2]
+            outputs["ranks_consistency_dist"] = ranks_consistency_dist # [batch_size, n_candidates, 2]
             assert outputs["select_process"].shape == (batch_size, 3, n_candidates-1), outputs["select_process"].shape
         return outputs
 

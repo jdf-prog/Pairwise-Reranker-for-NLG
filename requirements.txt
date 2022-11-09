@@ -10,3 +10,4 @@ sentencepiece
 pytorch-metric-learning
 prettytable
 fairscale
+pycocoevalcap

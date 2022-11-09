@@ -16,6 +16,7 @@ import datasets
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pathlib import Path
+from typing import List, Tuple, Union
 from common.data import (
     save_raw_dataset,
 )
@@ -25,19 +26,19 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type = int, default = 42)
 
 # data
-parser.add_argument('--dataset', type=str, default = "reddit",
-                    choices= ["cnndm", "xsum", "reddit", 'wmt18'])
+parser.add_argument('--dataset', type=str, default = "cnndm",
+                    choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
 
 parser.add_argument('--max_size', type = int, default = 1000000)
 
 args = parser.parse_args()
 
-dataset_keys = ["cnndm", "xsum", "reddit", 'wmt18']
-dataset_names = ["cnn_dailymail", "xsum", "reddit_tifu", "wmt18"]
-make_splits = [False, False, True, False]
-data_versions = ["3.0.0", None, "long", "zh-en"]
-source_keys = ["article", "document", "documents", "zh"]
-target_keys = ["highlights", "summary", "tldr", "en"]
+dataset_keys = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
+dataset_names = ["cnn_dailymail", "xsum", "reddit_tifu", "wmt18", 'common_gen']
+make_splits = [False, False, True, False, False]
+data_versions = ["3.0.0", None, "long", "zh-en", None]
+source_keys = ["article", "document", "documents", "zh", "concepts"]
+target_keys = ["highlights", "summary", "tldr", "en", "target"]
 
 idx = dataset_keys.index(args.dataset)
 args.dataset_name = dataset_names[idx]
@@ -65,11 +66,13 @@ def main(args):
         dataset = dataset["train"]
         if 'wmt' in args.dataset:
             slang, tlang = args.data_version.split('-')
-            sources = [d[slang] for d in dataset['translation'][:args.max_size]]
-            targets = [d[tlang] for d in dataset['translation'][:args.max_size]]
+            sources = [d[slang] for d in dataset['translation']][:args.max_size]
+            targets = [d[tlang] for d in dataset['translation']][:args.max_size]
         else:
-            sources = [x[args.source_key] for x in dataset[:args.max_size]]
-            target = [x[args.target_key] for x in dataset[:args.max_size]]
+            sources = [x[args.source_key] for x in dataset][:args.max_size]
+            target = [x[args.target_key] for x in dataset][:args.max_size]
+        sources = process_sources(sources)
+
 
         idx = np.random.permutation(len(sources))
         sources = [sources[i] for i in idx]
@@ -102,17 +105,30 @@ def main(args):
             dataset_set = dataset[set]
             if 'wmt' in args.dataset:
                 slang, tlang = args.data_version.split('-')
-                sources = [d[slang] for d in dataset_set['translation'][:args.max_size]]
-                targets = [d[tlang] for d in dataset_set['translation'][:args.max_size]]
+                sources = [d[slang] for d in dataset_set['translation']][:args.max_size]
+                targets = [d[tlang] for d in dataset_set['translation']][:args.max_size]
             else:
-                sources = [x[args.source_key] for x in dataset_set[:args.max_size]]
-                targets = [x[args.target_key] for x in dataset_set[:args.max_size]]
+                sources = [x[args.source_key] for x in dataset_set][:args.max_size]
+                targets = [x[args.target_key] for x in dataset_set][:args.max_size]
+            sources = process_sources(sources)
             save_raw_dataset(args.dataset, set_name, sources, targets)
 
 def seed_everything(seed=42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
+
+def process_sources(sources:List[Union[str, List[str]]]):
+    """
+        Used for common gen concepts
+    """
+    new_sources = []
+    for source in sources:
+        if isinstance(source, list):
+            new_sources.append(" ".join(source))
+        else:
+            new_sources.append(source)
+    return new_sources
 
 
 

@@ -2,6 +2,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --job-name=generate_candidates
 #SBATCH --output ../../jobs/%j.out
+#SBATCH --nodelist=ink-ellie
 #SBATCH --gres=gpu:2080:1
 #SBATCH -n 1
 
@@ -138,3 +139,54 @@
 #         --num_return_sequences 15 \
 #         --num_beams 15 \
 #         --num_beam_groups 15
+
+
+# commongen
+for set in "train" "val" "test"
+do
+    for method in "diverse_beam_search" "beam_search"
+    do
+        # python generate_candidate.py \
+        # --dataset commongen \
+        # --model_type flan-t5 \
+        # --model google/flan-t5-large \
+        # --model_name flan-t5-large \
+        # --load_model False \
+        # --set ${set} \
+        # --inference_bs 16 \
+        # --save_candidates True \
+        # --generation_method ${method} \
+        # --num_return_sequences 15 \
+        # --num_beams 15 \
+        # --num_beam_groups 15
+
+        # python generate_candidate.py \
+        # --dataset commongen \
+        # --model_type bart \
+        # --model sibyl/BART-large-commongen \
+        # --model_name bart_common_gen \
+        # --load_model False \
+        # --set ${set} \
+        # --inference_bs 16 \
+        # --save_candidates True \
+        # --generation_method ${method} \
+        # --num_return_sequences 15 \
+        # --num_beams 15 \
+        # --num_beam_groups 15
+
+        python generate_candidate.py \
+        --dataset commongen \
+        --model_type t5 \
+        --model mrm8488/t5-base-finetuned-common_gen \
+        --model_name t5_common_gen \
+        --load_model False \
+        --set ${set} \
+        --inference_bs 16 \
+        --save_candidates True \
+        --generation_method ${method} \
+        --num_return_sequences 15 \
+        --num_beams 15 \
+        --num_beam_groups 15
+
+    done
+done

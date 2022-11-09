@@ -4,12 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from gc import callbacks
-from sre_parse import State
-import time
 import os
-import sys
-import json
 import argparse
 import torch
 import transformers
@@ -238,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
-      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE"
+      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE"
     ], default="BCE")
     parser.add_argument("--localize", type=str2bool, default=False)
     parser.add_argument("--localize_ratio", type=float, default=0.4)
