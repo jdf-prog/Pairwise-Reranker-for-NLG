@@ -1,5 +1,5 @@
+transformers==4.24.0
 numpy
-transformers==4.10.0
 tensorboard
 nltk
 rouge_score

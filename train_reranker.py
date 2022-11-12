@@ -22,7 +22,7 @@ from src.common.utils import (
     seed_everything
 )
 from src.dualfid.trainer import (
-    compute_metrics,
+    compute_metrics_for_crosscompare,
 )
 from src.dualfid.model_util import (
     build_reranker,
@@ -35,6 +35,11 @@ from src.dualfid.data import (
 )
 from src.dualfid.trainer import (
     RerankerTrainer,
+)
+from src.dualfid.curriculum import (
+    CurriculumDataset,
+    CurriculumCallback,
+    compute_metrics_for_curriculum,
 )
 
 def main(args):
@@ -51,7 +56,10 @@ def main(args):
     data_collator = build_collator(
         args.reranker_type, tokenizer,
         args.source_maxlength, args.candidate_maxlength,
-        # "source text: ", "candidate text: ", "candidate text: " # for previous version2
+        # source_prefix="source text: ",
+        # candidate1_prefix="candidate text: ",
+        # candidate2_prefix="candidate text: ",
+        curriculum_learning=args.curriculum_learning
     )
 
     # set up dataset
@@ -144,8 +152,6 @@ def main(args):
         load_best_model_at_end=args.load_best_model_at_end,
         metric_for_best_model=args.metric_for_best_model,
         seed=args.seed,
-        disable_tqdm=False,
-        greater_is_better=True,
         local_rank=args.local_rank,
         fp16=args.fp16,
         deepspeed=args.deepspeed, #
@@ -156,7 +162,16 @@ def main(args):
         adafactor=args.adafactor,
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
+        save_total_limit=args.save_total_limit,
+        remove_unused_columns=False,
+        disable_tqdm=False,
+        greater_is_better=True,
     )
+    # custom argument for curriculum learning
+    training_args.curriculum_learning = args.curriculum_learning
+    training_args.num_curriculum = args.num_curriculum
+    training_args.curriculum_size = args.curriculum_size
+
     logging.info(f"training args: {training_args}")
     logging.info(f"model config: {config}")
 
@@ -168,6 +183,7 @@ def main(args):
         data_collator=data_collator,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
+        callbacks=[CurriculumCallback]
     )
 
     if args.do_train:
@@ -223,7 +239,7 @@ if __name__ == "__main__":
 
     # model config
     parser.add_argument("--reranker_type", type=str, choices=[
-        "scr", "dual", "crosscompare", "dualcompare", "comparegen"
+        "scr", "dual", "crosscompare", "dualcompare"
     ], default="sc")
     parser.add_argument("--model_type", type=str, choices=[
         "roberta", "bert", "t5", 'deberta'
@@ -309,11 +325,17 @@ if __name__ == "__main__":
         "steps", "epoch", "no"
     ], default="epoch")
     parser.add_argument("--save_steps", type=int, default=0)
+    parser.add_argument("--save_total_limit", type=int, default=10)
 
     # metrics config
     parser.add_argument("--load_best_model_at_end", type=str2bool, default=True)
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--metric_for_best_model", type=str, default="dev_score")
+
+    # curriculum learning
+    parser.add_argument("--curriculum_learning", type=str2bool, default=False)
+    parser.add_argument("--num_curriculum", type=int, default=1)
+    parser.add_argument("--curriculum_size", type=int, default=1000)
 
     # init args
     args = parser.parse_args()
@@ -326,6 +348,16 @@ if __name__ == "__main__":
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
     args.local_rank = os.environ.get("LOCAL_RANK", args.local_rank)
+
+    # prepare for curriculum learning
+    if args.curriculum_learning:
+        print("Using curriculum learning")
+        Dataset = CurriculumDataset
+        compute_metrics = compute_metrics_for_curriculum
+        args.num_train_epochs *= args.num_curriculum # multiply epochs
+    else:
+        compute_metrics = compute_metrics_for_crosscompare
+
 
     # set up logging
     if args.log_level == "passive":

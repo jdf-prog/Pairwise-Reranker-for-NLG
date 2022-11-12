@@ -32,6 +32,7 @@ class Dataset(torch.utils.data.Dataset):
     def get_example(self, index):
         return self.data[index]
 
+
 def load_data(data_path, args):
     assert data_path, "data_path is not specified"
     print("Loading data from {}".format(data_path))
@@ -44,17 +45,12 @@ def load_data(data_path, args):
     examples = []
 
     for item in data:
-        # debug, only use rouge1, rouge2, rougeL
-        for candidate in item['candidates']:
-            candidate['scores'] = {
-                "rouge1": candidate['scores']['rouge1'],
-                "rouge2": candidate['scores']['rouge2'],
-                "rougeL": candidate['scores']['rougeLsum'],
-            }
         if args.candidate_models is not None:
             item['candidates'] = [candidate for candidate in item['candidates'] if candidate['model'] in args.candidate_models]
         if args.candidate_generation_methods is not None:
             item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] in args.candidate_generation_methods]
+        if len(item['candidates']) == 0:
+            raise ValueError("No candidates left after filtering")
 
     for k, example in enumerate(data):
         if not 'id' in example:

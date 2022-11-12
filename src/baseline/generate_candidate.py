@@ -46,7 +46,7 @@ parser.add_argument('--dataset', type=str, default = "cnndm",
 
 # model
 parser.add_argument('--model_type', type = str, default = "pegasus",
-                    choices=["pegasus", "bart", "opus-mt", "t5", "flan-t5"])
+                    choices=["pegasus", "bart", "opus-mt", "t5", "flan-t5", "nllb"])
 parser.add_argument('--model', type = str, default = "google/pegasus-large",
                     choices = ["google/pegasus-large", "google/pegasus-cnn_dailymail", "google/pegasus-xsum",
                     "facebook/bart-large", "facebook/bart-large-cnn", "facebook/bart-large-xsum",
@@ -62,7 +62,7 @@ parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1"
                     "bart_xsum_first_half_shuffled_1", "bart_xsum_second_half_shuffled_1", "bart_xsum",
                     "pegasus_reddit_first_half_shuffled_1", "pegasus_reddit_second_half_shuffled_1", "pegasus_reddit_train_1",
                     "bart_reddit_first_half_shuffled_1", "bart_reddit_second_half_shuffled_1", "bart_reddit_train_1",
-                    "opus_mt", "nllb", "m2m100",
+                    "opus_mt", "nllb-3.3B", "nllb-1.3B", "nllb-600M", "m2m100",
                     'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen'])
 parser.add_argument('--load_model', type = str2bool, default = False)
 parser.add_argument('--load_model_path', type = str,
@@ -137,9 +137,12 @@ def main(args):
 
     # tokenizer
     tokenizer = build_tokenizer(args)
+    if "nllb" in args.model:
+        forced_bos_token_id = tokenizer.lang_code_to_id["eng_Latn"]
 
     # datasets
     sources, targets = data
+
     print(len(sources), len(targets))
     sources = sources[:args.max_val_size]
     targets = targets[:args.max_val_size]
@@ -147,6 +150,7 @@ def main(args):
     if args.debug:
         sources = sources[:args.debug_size]
         targets = targets[:args.debug_size]
+
     dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length)
     print("Total size of dataset: {}".format(len(sources)))
 
@@ -164,7 +168,7 @@ def main(args):
         print("Loaded the model weights!", args.load_model_path)
 
     # summary generation
-    sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args)
+    sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
     # export
     if args.save_candidates:
         save_pkl_sources_and_targets(args.dataset, args.set, sources, targets)

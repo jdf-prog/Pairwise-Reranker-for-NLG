@@ -3,12 +3,16 @@ import wandb
 import torch.nn as nn
 import numpy as np
 import os
+import wandb
+import logging
 from transformers.trainer import Trainer
 from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers import EvalPrediction
 from typing import Dict, List, Optional, Tuple, Union, Any
 from torch.utils.data import Dataset
-import wandb
+from dualfid.curriculum import CurriculumSampler
+
+logger = logging.getLogger(__name__)
 
 class RerankerTrainer(Trainer):
     def evaluate(
@@ -20,19 +24,22 @@ class RerankerTrainer(Trainer):
             wandb.log(metrics)
         return metrics
 
-    def save_model(self, output_dir: Optional[str] = None):
+    def save_model(self, output_dir: Optional[str] = None, **kwargs):
         if self.is_world_process_zero():
-            super().save_model(output_dir)
+            super().save_model(output_dir, **kwargs)
             model = self.model.module if hasattr(self.model, "module") else self.model
             torch.save(model.args, os.path.join(output_dir, "config.bin"))
 
-    def predict(
-        self,
-        test_dataset: Dataset,
-        ignore_keys: Optional[List[str]] = None,
-        metric_key_prefix: str = "test"
-    ):
-        return super().predict(test_dataset, ignore_keys, metric_key_prefix)
+    def _get_train_sampler(self):
+        if self.args.curriculum_learning:
+            sampler = CurriculumSampler(self.train_dataset, self.args.num_curriculum, self.args.curriculum_size)
+            logger.info("****** Using curriculum sampler ******")
+            logger.info("  Number of curriculum: {}".format(sampler.num_curriculum))
+            logger.info("  Curriculum size: {}".format(sampler.curriculum_size))
+            return sampler
+
+        else:
+            return super()._get_train_sampler()
 
 class FiDTrainer(Seq2SeqTrainer):
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -115,7 +122,7 @@ class FiDTrainer(Seq2SeqTrainer):
 #     }
 #     return metrics
 
-def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
+def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, float]:
     """
     Compute metrics for the model.
     Args:
@@ -124,6 +131,7 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
     preds, labels = eval_pred # scores [batch_size, n_candidates, n_tasks]
     select_process, ranks_acc_dist, ranks_consistency_dist = preds
     scores = labels # [batch_size, n_candidates, n_tasks]
+    # scores = scores[:, :-1] # debug
     sum_scores = np.sum(scores, axis=-1) # [batch_size, n_candidates]
     batch_size, n_candidates, n_tasks = scores.shape
     # compute accuracy
@@ -149,19 +157,13 @@ def compute_metrics(eval_pred: EvalPrediction) -> Dict[str, float]:
     oracle_best_scores = scores[np.arange(batch_size), np.argmax(sum_scores, axis=-1)]
 
     metrics = {
-        "sel": {
-            "acc": np.mean(accs),
-            "rouge1": np.mean(pred_best_scores[:, 0]),
-            "rouge2": np.mean(pred_best_scores[:, 1]),
-            "rougeL": np.mean(pred_best_scores[:, 2]),
-        },
-        "oracle": {
-            "rouge1": np.mean(oracle_best_scores[:, 0]),
-            "rouge2": np.mean(oracle_best_scores[:, 1]),
-            "rougeL": np.mean(oracle_best_scores[:, 2]),
-        },
-        "dev_score": np.mean(pred_best_scores[:, 1]), # dev score used for save checkpoint,
+        "sel": {"acc": np.mean(accs)},
+        "oracle": {},
     }
+    for i in range(n_tasks):
+        metrics["sel"]["metric_{}".format(i)] = np.mean(pred_best_scores[:, i])
+        metrics["oracle"]["metric_{}".format(i)] = np.mean(oracle_best_scores[:, i])
+    metrics['dev_score'] = metrics['sel']['metric_1']
 
     num_consistency = np.sum(ranks_consistency_dist[:,:,0], dtype=np.int32).item()
     num_in_consistency = np.sum(ranks_consistency_dist[:,:,1], dtype=np.int32).item()

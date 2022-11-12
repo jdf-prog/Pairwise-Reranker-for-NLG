@@ -6,7 +6,6 @@ from dualfid.reranker import (
     SCR,
     DualReranker,
     CrossCompareReranker,
-    CompareGenReranker,
     DualCompareReranker
 )
 from dualfid.fid import (
@@ -22,7 +21,7 @@ from dualfid.collator import (
     FiDCollator,
     SCRCollator,
     CrossCompareCollator,
-    CompareGenCollator
+    CurriculumCrossCompareCollator,
 )
 from transformers import (
     RobertaModel,
@@ -99,8 +98,6 @@ def build_reranker(reranker_type, model_type, model_name, cache_dir, config, tok
         reranker = CrossCompareReranker(pretrained_model, config, tokenizer)
     elif reranker_type == "dualcompare":
         reranker = DualCompareReranker(pretrained_model, config, tokenizer)
-    elif reranker_type == "comparegen":
-        reranker = CompareGenReranker(pretrained_model, config, tokenizer)
 
     return reranker
 
@@ -140,6 +137,7 @@ def build_collator(
     source_prefix:str = None,
     candidate1_prefix:str = None,
     candidate2_prefix:str = None,
+    curriculum_learning:bool = False,
     ):
     if model_type == "fid":
         return FiDCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
@@ -150,11 +148,12 @@ def build_collator(
     elif model_type == "dual":
         return DualCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
     elif model_type == "crosscompare":
-        return CrossCompareCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix, candidate2_prefix)
+        if curriculum_learning:
+            return CurriculumCrossCompareCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix, candidate2_prefix)
+        else:
+            return CrossCompareCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix, candidate2_prefix)
     elif model_type == "dualcompare":
         return DualCompareCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix)
-    elif model_type == "t5comparegen":
-        return CompareGenCollator(source_max_length, tokenizer, candidate_max_length, source_prefix, candidate1_prefix, candidate2_prefix)
     else:
         raise ValueError(f"model_type {model_type} not supported")
 

@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 import torch
 
-def get_candidates(tokenizer, val_loader, model, device, args):
+def get_candidates(tokenizer, val_loader, model, device, args, **kwargs):
     val_texts = []
     val_candidates = []
     val_labels = []
@@ -24,7 +24,7 @@ def get_candidates(tokenizer, val_loader, model, device, args):
         model.zero_grad()
         val_texts += batch["source"]
 
-        raw_candidates = beam_search_step(batch, tokenizer, base_model, device, args)
+        raw_candidates = beam_search_step(batch, tokenizer, base_model, device, args, **kwargs)
 
         candidates = []
         for i in range(len(batch["source"])):
@@ -39,7 +39,7 @@ def get_candidates(tokenizer, val_loader, model, device, args):
     return val_texts, val_candidates, val_labels
 
 
-def beam_search_step(batch, tokenizer, base_model, device, args):
+def beam_search_step(batch, tokenizer, base_model, device, args, **kwargs):
     # 1 - beam search
     if args.generation_method == "beam_search":
         summary_ids = base_model.generate(
@@ -52,7 +52,8 @@ def beam_search_step(batch, tokenizer, base_model, device, args):
             length_penalty = args.length_penalty,
             no_repeat_ngram_size = args.no_repeat_ngram_size,
             use_cache = True,
-            early_stopping = True
+            early_stopping = True,
+            **kwargs
         )
     # 2 - diverse beam search
     if args.generation_method == "diverse_beam_search":
@@ -68,7 +69,8 @@ def beam_search_step(batch, tokenizer, base_model, device, args):
             length_penalty = args.length_penalty,
             no_repeat_ngram_size = args.no_repeat_ngram_size,
             use_cache = True,
-            early_stopping = True
+            early_stopping = True,
+            **kwargs
         )
     # 3 - top-p sampling
     if args.generation_method == "top_p_sampling":
@@ -84,7 +86,8 @@ def beam_search_step(batch, tokenizer, base_model, device, args):
             length_penalty = args.length_penalty,
             no_repeat_ngram_size = args.no_repeat_ngram_size,
             use_cache = True,
-            early_stopping = True
+            early_stopping = True,
+            **kwargs
         )
     # 4 - top-k sampling
     if args.generation_method == "top_k_sampling":
@@ -100,7 +103,8 @@ def beam_search_step(batch, tokenizer, base_model, device, args):
             length_penalty = args.length_penalty,
             no_repeat_ngram_size = args.no_repeat_ngram_size,
             use_cache = True,
-            early_stopping = True
+            early_stopping = True,
+            **kwargs
         )
     generated = tokenizer.batch_decode(summary_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
 

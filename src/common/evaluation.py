@@ -73,7 +73,7 @@ def eval_bleu(
     Returns:
         A list of bleu scores, in same shape with hypotheses.
     """
-    assert len(hypotheses) == len(references)
+    assert len(hypotheses) == len(references), f"Length of hypotheses {len(hypotheses)} and references {len(references)} should be the same."
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
             hypotheses[i] = [hypotheses[i]]
@@ -151,7 +151,7 @@ def eval_cider(
     gts = tokenizer.tokenize(gts)
     res = tokenizer.tokenize(res)
     score, scores = cider_scorer.compute_score(gts, res)
-    cider_scores = [[scores[hypo_id] for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
+    cider_scores = [[scores[hypo_id]*10 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
     # nested remove list with single element
     if all([len(score) == 1 for score in cider_scores]):
         cider_scores = [score[0] for score in cider_scores]

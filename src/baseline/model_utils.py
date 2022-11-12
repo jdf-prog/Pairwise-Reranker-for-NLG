@@ -24,6 +24,9 @@ def build_tokenizer(args):
     elif args.model_type.startswith("flan-t5"):
         print("\nUsing Flan-T5 tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir = args.cache_dir)
+    elif args.model_type.startswith("nllb"):
+        print("\nUsing NLLB tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir = args.cache_dir)
     else:
         raise ValueError("Invalid model type")
     return tokenizer
@@ -44,6 +47,9 @@ def build_model(args):
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model, cache_dir = args.cache_dir)
     elif args.model_type.startswith("flan-t5"):
         print("\nUsing Flan-T5 model")
+        model = AutoModelForSeq2SeqLM.from_pretrained(args.model, cache_dir = args.cache_dir)
+    elif args.model_type.startswith("nllb"):
+        print("\nUsing NLLB model")
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model, cache_dir = args.cache_dir)
     else:
         raise ValueError("Invalid model type")

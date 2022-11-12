@@ -16,14 +16,14 @@
 #     --metrics "bleu,rouge"
 #     --num_workers 2 \
 
-# python eval_oracle.py \
-#     --dataset wmt18 \
-#     --set val \
-#     --metrics "bleu"
-#     --num_workers 1 \
-
 python eval_oracle.py \
-    --dataset commongen \
-    --set test \
-    --metrics "bleu,cider" \
+    --dataset wmt18 \
+    --set train \
+    --metrics "bleu" \
     --num_workers 1 \
+
+# python eval_oracle.py \
+#     --dataset commongen \
+#     --set train \
+#     --metrics "bleu,cider" \
+#     --num_workers 1 \

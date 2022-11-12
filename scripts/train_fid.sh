@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=24:00:00
 #SBATCH --job-name=train_reranker
-#SBATCH --output ./jobs/%j.out
+#SBATCH --output ../jobs/%j.out
 #SBATCH --gres=gpu:6000:1
 #SBATCH -n 1
 
@@ -12,6 +12,8 @@ test_data_path="./data/prepared/cnndm/test/dataset.jsonl"
 nvidia-smi
 
 localhost=$RANDOM
+
+cd ../
 
 torchrun \
     --rdzv_backend=c10d \

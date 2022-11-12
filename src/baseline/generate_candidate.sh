@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --job-name=generate_candidates
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --nodelist=ink-ellie
-#SBATCH --gres=gpu:2080:1
+#SBATCH --nodelist=ink-molly
+#SBATCH --gres=gpu:1
 #SBATCH -n 1
 
 # python generate_candidate.py \
@@ -104,27 +104,27 @@
 #     done
 # done
 
-# # wmt18
-# for set in "train"
-# do
-#     for method in "diverse_beam_search" "beam_search"
-#     do
-#         python generate_candidate.py \
-#         --dataset wmt18 \
-#         --model_type opus-mt \
-#         --model Helsinki-NLP/opus-mt-zh-en \
-#         --model_name opus_mt \
-#         --load_model False \
-#         --set ${set} \
-#         --inference_bs 2 \
-#         --save_candidates True \
-#         --generation_method ${method} \
-#         --num_return_sequences 15 \
-#         --num_beams 15 \
-#         --num_beam_groups 15
+# wmt18
+for set in "val" "test"
+do
+    for method in "beam_search" "diverse_beam_search"
+    do
+        python generate_candidate.py \
+        --dataset wmt18 \
+        --model_type nllb \
+        --model facebook/nllb-200-distilled-1.3B \
+        --model_name nllb-1.3B \
+        --load_model False \
+        --set ${set} \
+        --inference_bs 1 \
+        --save_candidates True \
+        --generation_method ${method} \
+        --num_return_sequences 15 \
+        --num_beams 15 \
+        --num_beam_groups 15
 
-#     done
-# done
+    done
+done
 
 # python generate_candidate.py \
 #         --dataset xsum \
@@ -141,52 +141,52 @@
 #         --num_beam_groups 15
 
 
-# commongen
-for set in "train" "val" "test"
-do
-    for method in "diverse_beam_search" "beam_search"
-    do
-        # python generate_candidate.py \
-        # --dataset commongen \
-        # --model_type flan-t5 \
-        # --model google/flan-t5-large \
-        # --model_name flan-t5-large \
-        # --load_model False \
-        # --set ${set} \
-        # --inference_bs 16 \
-        # --save_candidates True \
-        # --generation_method ${method} \
-        # --num_return_sequences 15 \
-        # --num_beams 15 \
-        # --num_beam_groups 15
+# # commongen
+# for set in "train" "val" "test"
+# do
+#     for method in "diverse_beam_search" "beam_search"
+#     do
+#         # python generate_candidate.py \
+#         # --dataset commongen \
+#         # --model_type flan-t5 \
+#         # --model google/flan-t5-large \
+#         # --model_name flan-t5-large \
+#         # --load_model False \
+#         # --set ${set} \
+#         # --inference_bs 16 \
+#         # --save_candidates True \
+#         # --generation_method ${method} \
+#         # --num_return_sequences 15 \
+#         # --num_beams 15 \
+#         # --num_beam_groups 15
 
-        # python generate_candidate.py \
-        # --dataset commongen \
-        # --model_type bart \
-        # --model sibyl/BART-large-commongen \
-        # --model_name bart_common_gen \
-        # --load_model False \
-        # --set ${set} \
-        # --inference_bs 16 \
-        # --save_candidates True \
-        # --generation_method ${method} \
-        # --num_return_sequences 15 \
-        # --num_beams 15 \
-        # --num_beam_groups 15
+#         # python generate_candidate.py \
+#         # --dataset commongen \
+#         # --model_type bart \
+#         # --model sibyl/BART-large-commongen \
+#         # --model_name bart_common_gen \
+#         # --load_model False \
+#         # --set ${set} \
+#         # --inference_bs 16 \
+#         # --save_candidates True \
+#         # --generation_method ${method} \
+#         # --num_return_sequences 15 \
+#         # --num_beams 15 \
+#         # --num_beam_groups 15
 
-        python generate_candidate.py \
-        --dataset commongen \
-        --model_type t5 \
-        --model mrm8488/t5-base-finetuned-common_gen \
-        --model_name t5_common_gen \
-        --load_model False \
-        --set ${set} \
-        --inference_bs 16 \
-        --save_candidates True \
-        --generation_method ${method} \
-        --num_return_sequences 15 \
-        --num_beams 15 \
-        --num_beam_groups 15
+#         python generate_candidate.py \
+#         --dataset commongen \
+#         --model_type t5 \
+#         --model mrm8488/t5-base-finetuned-common_gen \
+#         --model_name t5_common_gen \
+#         --load_model False \
+#         --set ${set} \
+#         --inference_bs 16 \
+#         --save_candidates True \
+#         --generation_method ${method} \
+#         --num_return_sequences 15 \
+#         --num_beams 15 \
+#         --num_beam_groups 15
 
-    done
-done
+#     done
+# done
