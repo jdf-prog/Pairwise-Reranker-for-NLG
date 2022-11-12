@@ -139,6 +139,8 @@ def main(args):
     tokenizer = build_tokenizer(args)
     if "nllb" in args.model:
         forced_bos_token_id = tokenizer.lang_code_to_id["eng_Latn"]
+    else:
+        forced_bos_token_id = None
 
     # datasets
     sources, targets = data

@@ -70,7 +70,7 @@ def main(args):
         train_examples = load_data(args.train_data_path, args)
         train_dataset = Dataset(train_examples, args.n_candidates)
     if args.do_eval:
-        eval_examples = load_data(args.eval_data_path, args)
+        eval_examples = load_data(args.eval_data_path, args)[:100]
         eval_dataset = Dataset(eval_examples, args.n_candidates)
     if args.do_predict:
         predict_examples = load_data(args.test_data_path, args)
@@ -242,7 +242,7 @@ if __name__ == "__main__":
         "scr", "dual", "crosscompare", "dualcompare"
     ], default="sc")
     parser.add_argument("--model_type", type=str, choices=[
-        "roberta", "bert", "t5", 'deberta'
+        "roberta", "bert", "t5", 'deberta', 'xlm-roberta'
     ], default="roberta")
     parser.add_argument("--model_name", type=str, default="roberta-base")
     parser.add_argument("--load_checkpoint", type=str, default=None)

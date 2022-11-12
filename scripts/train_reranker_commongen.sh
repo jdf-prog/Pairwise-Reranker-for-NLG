@@ -6,6 +6,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH -n 1
 
+# about 9 hours per training epoch
+# quick for each dev evaluation
 
 dataset="commongen"
 
@@ -17,7 +19,7 @@ nvidia-smi
 
 localhost=$RANDOM
 
-cd .../
+cd ../
 
 # common-gen
 torchrun \

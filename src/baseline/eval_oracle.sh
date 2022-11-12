@@ -7,18 +7,18 @@
 # python eval_oracle.py \
 #     --dataset cnndm \
 #     --set train \
-#     --metrics "bleu,rouge"
+#     --metrics "bleu,rouge" \
 #     --num_workers 2 \
 
 # python eval_oracle.py \
 #     --dataset xsum \
-#     --set val \
-#     --metrics "bleu,rouge"
+#     --set test \
+#     --metrics "bleu,rouge" \
 #     --num_workers 2 \
 
 python eval_oracle.py \
     --dataset wmt18 \
-    --set train \
+    --set test \
     --metrics "bleu" \
     --num_workers 1 \
 

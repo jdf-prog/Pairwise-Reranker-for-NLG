@@ -34,7 +34,7 @@ train_reranker.py \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
     --n_candidates 30 \
-    --candidate_model "nllb-1.3B" \
+    --candidate_model "opus_mt" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \

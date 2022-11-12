@@ -2,7 +2,9 @@
 import psutil
 import os
 from evaluate import load
-from sacrebleu import sentence_bleu
+from sacrebleu import sentence_bleu, corpus_bleu
+from nltk.translate.bleu_score import corpus_bleu as nltk_corpus_bleu
+from nltk.translate.bleu_score import sentence_bleu as nltk_sentence_bleu
 from typing import List, Optional, Union, Dict, Tuple
 from absl import logging
 from torch import split

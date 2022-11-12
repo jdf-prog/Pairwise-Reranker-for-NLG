@@ -40,6 +40,9 @@ def main(args):
         args.metrics.extend(["rouge1", "rouge2", "rougeL", "rougeLsum"])
         args.metrics.remove('rouge')
     metrics = args.metrics
+    assert set(metrics).issubset(set(SUPPORTED_METRICS)), \
+        "Unsupported metrics: {}".format(set(SUPPORTED_METRICS)-set(metrics))
+
 
     # model and generation_method of current computed candidates
     types = get_candidate_types(args.dataset, args.set)
@@ -76,6 +79,5 @@ if __name__ == "__main__":
         help="metrics to compute, support rouge, bleu, bleurt, cider, spice")
     args = parser.parse_args()
     args.metrics = args.metrics.split(",")
-    assert set(args.metrics).issubset(set(SUPPORTED_METRICS)), "Unsupported metrics: {}".format(args.metrics)
     print(args)
     main(args)

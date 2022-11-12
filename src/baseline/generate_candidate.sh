@@ -104,16 +104,38 @@
 #     done
 # done
 
-# wmt18
-for set in "val" "test"
+# # wmt18
+# for set in "val" "test"
+# do
+#     for method in "beam_search" "diverse_beam_search"
+#     do
+#         python generate_candidate.py \
+#         --dataset wmt18 \
+#         --model_type nllb \
+#         --model facebook/nllb-200-distilled-1.3B \
+#         --model_name nllb-1.3B \
+#         --load_model False \
+#         --set ${set} \
+#         --inference_bs 1 \
+#         --save_candidates True \
+#         --generation_method ${method} \
+#         --num_return_sequences 15 \
+#         --num_beams 15 \
+#         --num_beam_groups 15
+
+#     done
+# done
+
+# wmt17
+for set in "test"
 do
     for method in "beam_search" "diverse_beam_search"
     do
         python generate_candidate.py \
-        --dataset wmt18 \
-        --model_type nllb \
-        --model facebook/nllb-200-distilled-1.3B \
-        --model_name nllb-1.3B \
+        --dataset wmt17 \
+        --model_type opus-mt \
+        --model Helsinki-NLP/opus-mt-zh-en \
+        --model_name opus_mt \
         --load_model False \
         --set ${set} \
         --inference_bs 1 \
