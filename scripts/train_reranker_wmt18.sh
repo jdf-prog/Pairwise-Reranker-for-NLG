@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
+#SBATCH --time=72:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
@@ -43,11 +43,14 @@ train_reranker.py \
     --gradient_accumulation_steps 16 \
     --num_train_epochs 3 \
     --overwrite_output_dir True \
-    --num_pos 4 \
-    --num_neg 4 \
+    --num_pos 2 \
+    --num_neg 2 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
-    --evaluate_first_step True \
+    --max_train_data_size 50000 \
+    --max_eval_data_size -1 \
+    --max_predict_data_size -1 \
+    # --evaluate_first_step True \
     # --do_predict False \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
     # --evaluation_strategy "steps" \

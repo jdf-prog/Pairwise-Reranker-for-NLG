@@ -49,8 +49,11 @@ train_reranker.py \
     --num_neg 4 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
-    --evaluate_first_step True \
+    --max_train_data_size -1 \
+    --max_eval_data_size -1 \
+    --max_predict_data_size -1 \
     --do_predict False \
+    # --evaluate_first_step True \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 100 \
