@@ -428,7 +428,7 @@ class CrossCompareReranker(nn.Module):
         Args:
             input_ids: [*, seq_len]
             attention_mask: [*, seq_len]
-            scores: [*, 2]
+            scores: [*, 2], left scores, right scores
         Returns:
             pred_probs: [*]
         """
@@ -582,7 +582,7 @@ class CrossCompareReranker(nn.Module):
             outputs = self._forward(
                 candidate_pair_ids,
                 candidate_pair_attention_mask,
-                scores.sum(-1)
+                scores.mean(-1)
             )
 
         elif candidate_pair_ids.dim() == 4:
@@ -592,7 +592,7 @@ class CrossCompareReranker(nn.Module):
                 batch_size, n_candidates, n_tasks = scores.shape
                 if self.args['n_candidates'] == -1:
                     self.args['n_candidates'] = n_candidates
-                scores = scores.sum(dim=-1)
+                scores = scores.mean(dim=-1)
 
                 n_pair = min(self.num_pos, self.num_neg)
                 left_idx, right_idx = self.sampling(scores, n_pair, device, self.sub_sampling_mode)
@@ -605,7 +605,7 @@ class CrossCompareReranker(nn.Module):
                 outputs = self._forward(
                     candidate_pair_ids,
                     candidate_pair_attention_mask,
-                    torch.stack([left_scores, right_scores], dim=1)
+                    torch.stack([left_scores, right_scores], dim=-1)
                 )
 
             else:
@@ -643,7 +643,7 @@ class CrossCompareReranker(nn.Module):
                     to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
                     to_model_scores = torch.stack(
                         [scores[torch.arange(batch_size), cur_idx], scores[torch.arange(batch_size), next_idx]],
-                    dim=1) # [batch_size, 2]
+                    dim=-1) # [batch_size, 2]
                     _outputs = self._forward(
                         to_model_ids, to_model_attention_mask, to_model_scores
                     ) # [batch_size]
@@ -656,7 +656,7 @@ class CrossCompareReranker(nn.Module):
                     to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
                     to_model_scores = torch.stack(
                         [scores[torch.arange(batch_size), next_idx], scores[torch.arange(batch_size), cur_idx]],
-                    dim=1) # [batch_size, 2]
+                    dim=-1) # [batch_size, 2]
                     _outputs = self._forward(
                         to_model_ids, to_model_attention_mask, to_model_scores
                     ) # [batch_size]

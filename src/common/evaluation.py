@@ -19,6 +19,16 @@ logging.set_verbosity(logging.WARNING)
 
 
 SUPPORTED_METRICS = ['rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bleu', 'bleurt', "cider", "spice"]
+METRIC_WEIGHTS = {
+    "rouge1": 1.0,
+    "rouge2": 1.0,
+    "rougeL": 1.0,
+    "rougeLsum": 1.0,
+    "bleu": 0.01,
+    "bleurt": 1.0,
+    "cider": 0.01,
+    "spice": 0.01,
+} # scale to 0-1
 
 def pre_rouge_processing(summary):
     summary = summary.replace("<n>", " ")

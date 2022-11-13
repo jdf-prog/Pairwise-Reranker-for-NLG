@@ -67,13 +67,13 @@ def main(args):
     eval_dataset = None
     predict_dataset = None
     if args.do_train:
-        train_examples = load_data(args.train_data_path, args)
+        train_examples = load_data(args.train_data_path, args, mode='train')
         train_dataset = Dataset(train_examples, args.n_candidates)
     if args.do_eval:
-        eval_examples = load_data(args.eval_data_path, args)[:100]
+        eval_examples = load_data(args.eval_data_path, args, mode='val')
         eval_dataset = Dataset(eval_examples, args.n_candidates)
     if args.do_predict:
-        predict_examples = load_data(args.test_data_path, args)
+        predict_examples = load_data(args.test_data_path, args, mode='predict')
         predict_dataset = Dataset(predict_examples, args.n_candidates)
 
 
@@ -267,6 +267,9 @@ if __name__ == "__main__":
         "uniform", "top_bottom", "top_random", "random_bottom",
         "importance", "random", "poisson_dynamic"
     ], default="top_bottom")
+    parser.add_argument("--max_train_data_size", type=int, default=25000)
+    parser.add_argument("--max_eval_data_size", type=int, default=-1)
+    parser.add_argument("--max_predict_data_size", type=int, default=-1)
 
     # running config
     parser.add_argument("--seed", type=int, default=42)

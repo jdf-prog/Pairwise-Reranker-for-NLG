@@ -132,7 +132,7 @@ def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, flo
     select_process, ranks_acc_dist, ranks_consistency_dist = preds
     scores = labels # [batch_size, n_candidates, n_tasks]
     # scores = scores[:, :-1] # debug
-    sum_scores = np.sum(scores, axis=-1) # [batch_size, n_candidates]
+    mean_scores = np.mean(scores, axis=-1) # [batch_size, n_candidates]
     batch_size, n_candidates, n_tasks = scores.shape
     # compute accuracy
     accs = []
@@ -142,27 +142,31 @@ def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, flo
         pred_better_idx = select_process[:, 2, i]
         # print(cur_idx)
         # print(next_idx)
-        cur_scores = sum_scores[np.arange(batch_size), cur_idx]
-        next_scores = sum_scores[np.arange(batch_size), next_idx]
-        pred_better_scores = sum_scores[np.arange(batch_size), pred_better_idx]
+        cur_scores = mean_scores[np.arange(batch_size), cur_idx]
+        next_scores = mean_scores[np.arange(batch_size), next_idx]
+        pred_better_scores = mean_scores[np.arange(batch_size), pred_better_idx]
         better_scores = np.maximum(cur_scores, next_scores)
         # print(cur_scores)
-        # print(sum_scores[np.arange(batch_size), next_idx])
+        # print(mean_scores[np.arange(batch_size), next_idx])
         # print(pred_better_scores)
         accs.append(np.mean((pred_better_scores == better_scores)))
         cur_idx = next_idx
     accs = np.array(accs)
     pred_best_idx = select_process[:, 2, -1]
+
+    # metric_scores, denormalized these scores
     pred_best_scores = scores[np.arange(batch_size), pred_best_idx]
-    oracle_best_scores = scores[np.arange(batch_size), np.argmax(sum_scores, axis=-1)]
+    oracle_best_scores = scores[np.arange(batch_size), np.argmax(mean_scores, axis=-1)]
 
     metrics = {
         "sel": {"acc": np.mean(accs)},
         "oracle": {},
+        "top_beam": {},
     }
     for i in range(n_tasks):
         metrics["sel"]["metric_{}".format(i+1)] = np.mean(pred_best_scores[:, i])
         metrics["oracle"]["metric_{}".format(i+1)] = np.mean(oracle_best_scores[:, i])
+        metrics["top_beam"]["metric_{}".format(i+1)] = np.mean(scores[:, 0, i])
     metrics['dev_score'] = metrics['sel']['metric_1']
 
     num_consistency = np.sum(ranks_consistency_dist[:,:,0], dtype=np.int32).item()

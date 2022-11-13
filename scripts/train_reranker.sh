@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
+#SBATCH --time=4:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
@@ -7,15 +7,15 @@
 #SBATCH -n 1
 
 
-dataset="commongen"
+dataset="cnndm"
 
-# train_data_path="./data/prepared/${dataset}/val/dataset_train.jsonl"
-# dev_data_path="./data/prepared/${dataset}/val/dataset_val_min.jsonl"
-# test_data_path="./data/prepared/${dataset}/test/dataset.jsonl"
-
-train_data_path="./data/prepared/${dataset}/train/dataset.jsonl"
-dev_data_path="./data/prepared/${dataset}/val/dataset.jsonl"
+train_data_path="./data/prepared/${dataset}/val/dataset_train.jsonl"
+dev_data_path="./data/prepared/${dataset}/val/dataset_val_min.jsonl"
 test_data_path="./data/prepared/${dataset}/test/dataset.jsonl"
+
+# train_data_path="./data/prepared/${dataset}/train/dataset.jsonl"
+# dev_data_path="./data/prepared/${dataset}/val/dataset.jsonl"
+# test_data_path="./data/prepared/${dataset}/test/dataset.jsonl"
 
 nvidia-smi
 
@@ -152,46 +152,6 @@ cd ../
 #     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_mean_BCE/checkpoint-100" \
 
 
-# torchrun \
-#     --rdzv_backend=c10d \
-#     --rdzv_endpoint="localhost:${localhost}" \
-#     --nnodes 1 \
-#     --nproc_per_node 1 \
-# train_reranker.py \
-#     --reranker_type "crosscompare" \
-#     --model_type "roberta" \
-#     --model_name "roberta-large" \
-#     --run_name "debug" \
-#     --train_data_path ${train_data_path} \
-#     --eval_data_path ${dev_data_path} \
-#     --test_data_path ${test_data_path} \
-#     --n_candidates 30 \
-#     --candidate_model "pegasus_cnndm" \
-#     --candidate_generation_method "diverse_beam_search+beam_search" \
-#     --source_maxlength 256 \
-#     --candidate_maxlength 128 \
-#     --per_device_train_batch_size 1 \
-#     --per_device_eval_batch_size 32 \
-#     --gradient_accumulation_steps 16 \
-#     --num_train_epochs 3 \
-#     --overwrite_output_dir True \
-#     --num_pos 4 \
-#     --num_neg 4 \
-#     --loss_type "BCE" \
-#     --sub_sampling_mode "top_bottom" \
-#     --evaluate_first_step True \
-#     --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
-#     # --evaluation_strategy "steps" \
-#     # --save_strategy "steps" \
-#     # --eval_steps 100 \
-#     # --save_steps 100 \
-#     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
-#     # --do_train False \
-#     # --do_eval False \
-#     # --do_predict True \
-
-
-# common-gen
 torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint="localhost:${localhost}" \
@@ -201,73 +161,34 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_4_pos_4_neg_train_common_gen" \
+    --run_name "debug" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
     --n_candidates 30 \
-    --candidate_model "t5_common_gen" \
+    --candidate_model "pegasus_cnndm" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
-    --source_maxlength 30 \
-    --candidate_maxlength 30 \
-    --per_device_train_batch_size 12 \
-    --per_device_eval_batch_size 128 \
-    --gradient_accumulation_steps 4 \
+    --source_maxlength 256 \
+    --candidate_maxlength 128 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 16 \
     --num_train_epochs 3 \
     --overwrite_output_dir True \
     --num_pos 4 \
     --num_neg 4 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
+    --evaluation_strategy "steps" \
+    --save_strategy "steps" \
+    --eval_steps 100 \
+    --save_steps 100 \
     --evaluate_first_step True \
-    --do_predict False \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
-    # --evaluation_strategy "steps" \
-    # --save_strategy "steps" \
-    # --eval_steps 100 \
-    # --save_steps 100 \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
     # --do_train False \
     # --do_eval False \
-
-# # wmt18
-# torchrun \
-#     --rdzv_backend=c10d \
-#     --rdzv_endpoint="localhost:${localhost}" \
-#     --nnodes 1 \
-#     --nproc_per_node 1 \
-# train_reranker.py \
-#     --reranker_type "crosscompare" \
-#     --model_type "xlm-roberta" \
-#     --model_name "xlm-roberta-large" \
-#     --run_name "debug" \
-#     --train_data_path ${train_data_path} \
-#     --eval_data_path ${dev_data_path} \
-#     --test_data_path ${test_data_path} \
-#     --n_candidates 30 \
-#     --candidate_model "nllb-1.3B" \
-#     --candidate_generation_method "diverse_beam_search+beam_search" \
-#     --source_maxlength 256 \
-#     --candidate_maxlength 128 \
-#     --per_device_train_batch_size 1 \
-#     --per_device_eval_batch_size 32 \
-#     --gradient_accumulation_steps 16 \
-#     --num_train_epochs 3 \
-#     --overwrite_output_dir True \
-#     --num_pos 4 \
-#     --num_neg 4 \
-#     --loss_type "BCE" \
-#     --sub_sampling_mode "top_bottom" \
-#     --evaluate_first_step True \
-#     # --do_predict False \
-#     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
-#     # --evaluation_strategy "steps" \
-#     # --save_strategy "steps" \
-#     # --eval_steps 100 \
-#     # --save_steps 100 \
-#     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
-#     # --do_train False \
-#     # --do_eval False \
+    # --do_predict True \
 
 
 # # curriculum learning

@@ -53,11 +53,11 @@ train_reranker.py \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --do_predict False \
-    # --evaluate_first_step True \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 100 \
     # --save_steps 100 \
+    # --evaluate_first_step True \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
     # --do_train False \
     # --do_eval False \

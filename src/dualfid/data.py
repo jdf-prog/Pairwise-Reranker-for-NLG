@@ -8,6 +8,7 @@ import torch
 import random
 import json
 import numpy as np
+from common.evaluation import METRIC_WEIGHTS
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self,
@@ -33,7 +34,7 @@ class Dataset(torch.utils.data.Dataset):
         return self.data[index]
 
 
-def load_data(data_path, args):
+def load_data(data_path, args, mode='train'):
     assert data_path, "data_path is not specified"
     print("Loading data from {}".format(data_path))
     if data_path.endswith('.jsonl'):
@@ -42,6 +43,20 @@ def load_data(data_path, args):
     elif data_path.endswith('.json'):
         with open(data_path, 'r') as fin:
             data = json.load(fin)
+    if mode == 'train':
+        max_size = args.max_train_data_size
+    elif mode == 'val':
+        max_size = args.max_eval_data_size
+    elif mode == 'predict':
+        max_size = args.max_predict_data_size
+    else:
+        raise ValueError("mode should be one of train, val, predict")
+    if max_size > 0:
+        random_indices = np.random.permutation(len(data))[:max_size]
+        data = [data[i] for i in random_indices]
+    else:
+        random_indices = np.random.permutation(len(data))
+        data = [data[i] for i in random_indices]
     examples = []
 
     for item in data:
@@ -58,24 +73,38 @@ def load_data(data_path, args):
         examples.append(example)
         for candidate in example['candidates']:
             candidate['scores'] = {k:float(v) for k,v in list(candidate['scores'].items())}
-    check_scores(examples)
+    examples = check_and_normalize_scores(examples)
     return examples
 
-def check_scores(examples):
+def check_and_normalize_scores(examples):
     """
         Check the upper bound of the scores and print it
     """
     n_candidates = len(examples[0]['candidates'])
     task_names = list(examples[0]['candidates'][0]['scores'].keys())
-    max_scores = {task:[] for task in task_names}
+    max_scores_per_group = {task:[] for task in task_names}
+    scores = {task:[] for task in task_names}
     for example in examples:
         for task in task_names:
-            max_scores[task].append(max([c['scores'][task] for c in example['candidates']]))
+            scores[task].extend([c['scores'][task] for c in example['candidates']])
+            max_scores_per_group[task].append(max([c['scores'][task] for c in example['candidates']]))
+    # print checked scores
+    for task in task_names:
+        print(f"Selection Upper bound for task '{task}' is {np.mean(max_scores_per_group[task])}")
     candidate_scores = {task:[np.mean([ex['candidates'][i]['scores'][task] for ex in examples]) for i in range(n_candidates)] for task in task_names}
     for task in task_names:
-        print(f"Selection Upper bound for task '{task}' is {np.mean(max_scores[task])}")
-    for task in task_names:
         print(f"Candidate mean scores for task '{task}' are {candidate_scores[task]}")
+
+    # normalize scores if training dataset
+    metric_weights = METRIC_WEIGHTS
+
+    for example in examples:
+        for candidate in example['candidates']:
+            for task in task_names:
+                candidate['scores'][task] *= metric_weights[task]
+    return examples
+
+
 
 
 
