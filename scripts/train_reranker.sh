@@ -2,7 +2,7 @@
 #SBATCH --time=4:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --nodelist=ink-ellie
+#SBATCH --nodelist=ink-molly
 #SBATCH --gres=gpu:1
 #SBATCH -n 1
 

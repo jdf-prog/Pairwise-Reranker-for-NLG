@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import os
 from dualfid.layers import (
     MoE,
+    MIDisentangledLayer
 )
 from dualfid.loss import (
     infoNCE_loss,
@@ -396,6 +397,7 @@ class CrossCompareReranker(nn.Module):
         self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.loss_type = self.args["loss_type"]
         self.drop_out = self.args.get("drop_out", 0.05)
+        self.MI_lambda = self.args.get("MI_lambda", 0.1)
 
         # LM
         self.pretrained_model = pretrained_model
@@ -404,13 +406,8 @@ class CrossCompareReranker(nn.Module):
 
         self.tokenizer = tokenizer
 
-        # self.regression_layer = nn.Sequential(
-        #     nn.Dropout(self.drop_out),
-        #     nn.Linear(3 * self.hidden_size, 6 * self.hidden_size),
-        #     nn.Tanh(),
-        #     nn.Dropout(self.drop_out),
-        #     nn.Linear(6 * self.hidden_size, 1),
-        # )
+        self.disentangle_layer = MIDisentangledLayer(self.hidden_size)
+
 
         # parameters for dynamic epochs
         self.args['training_steps'] = self.args.get('training_steps', 0)
@@ -459,6 +456,8 @@ class CrossCompareReranker(nn.Module):
         assert (np.array(cand1_tokens) == "<candidate1>").all(), cand1_tokens
         assert (np.array(cand2_tokens) == "<candidate2>").all(), cand2_tokens
 
+        # get the exclusive encodings of cand1 and cand2
+        aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs)
         left_sim = F.cosine_similarity(source_encs, cand1_encs)
         right_sim = F.cosine_similarity(source_encs, cand2_encs)
         left_scores = scores[:, 0]
@@ -489,13 +488,7 @@ class CrossCompareReranker(nn.Module):
             loss = F.mse_loss(left_sim - right_sim, dif_scores)
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
-
-        # TODO: test if this work
-        # # compute auxiliary loss
-        # aux_encs = torch.cat([cand1_encs, cand2_encs, cand1_encs - cand2_encs], dim=-1)
-        # aux_scores = self.regression_layer(aux_encs).squeeze(-1)
-        # aux_loss = F.mse_loss(aux_scores, dif_scores)
-        # loss += aux_loss
+        loss += aux_loss
 
         left_sim = left_sim.view(original_shape)
         right_sim = right_sim.view(original_shape)
