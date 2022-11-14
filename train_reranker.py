@@ -93,8 +93,6 @@ def main(args):
         "sub_sampling_ratio": args.sub_sampling_ratio,
         "sub_sampling_mode": args.sub_sampling_mode,
         "loss_type": args.loss_type,
-        "localize": args.localize,
-        "localize_ratio": args.localize_ratio,
         "new_num_tokens": len(tokenizer),
         "training_data_size": len(train_dataset) if train_dataset else 0,
         "n_candidates": args.n_candidates,
@@ -251,8 +249,6 @@ if __name__ == "__main__":
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
       "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE"
     ], default="BCE")
-    parser.add_argument("--localize", type=str2bool, default=False)
-    parser.add_argument("--localize_ratio", type=float, default=0.4)
 
     # data config
     parser.add_argument("--n_candidates", type=int, default=-1)

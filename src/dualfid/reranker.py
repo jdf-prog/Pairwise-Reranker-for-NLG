@@ -145,18 +145,7 @@ class SCR(nn.Module):
         if self.training:
             # sub sampling candidates if needed
             batch_size, n_candidates, seq_len = input_ids.shape
-            if self.localize and self.step % 50 >= 25:
-                with torch.no_grad():
-                    pred_scores, _ = self._forawrd(input_ids.view(-1, seq_len), attention_mask.view(-1, seq_len))
-                    pred_scores = pred_scores.reshape(batch_size, n_candidates, -1)
-                    selected_idx = sub_sampling(
-                        "top", self.num_pos, self.num_neg, self.localize_ratio, pred_scores
-                    )
-                    input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-                    attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-                    scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-                    labels = labels[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-            sub_idx = sub_sampling(
+            selected_idx = sub_sampling(
                 self.sub_sampling_mode, self.num_pos, self.num_neg, self.sub_sampling_ratio, scores
             )
             input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
@@ -397,7 +386,9 @@ class CrossCompareReranker(nn.Module):
         self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.loss_type = self.args["loss_type"]
         self.drop_out = self.args.get("drop_out", 0.05)
-        self.MI_lambda = self.args.get("MI_lambda", 0.1)
+        self.aim_sh = self.args.get("aim_sh", True) # aim at the shared embedding learning
+        self.aim_ex = self.args.get("aim_ex", False) # aim at the exclusive embedding learning
+        self.aim_cls = self.args.get("aim_cls", False) # aim at classification
 
         # LM
         self.pretrained_model = pretrained_model
@@ -448,53 +439,41 @@ class CrossCompareReranker(nn.Module):
         source_encs = encs[:, 1, :]
         cand1_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1, :]
         cand2_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1, :]
-        # debug
-        source_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[:, 1])
-        cand1_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1])
-        cand2_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1])
-        assert (np.array(source_tokens) == "<source>").all(), source_tokens
-        assert (np.array(cand1_tokens) == "<candidate1>").all(), cand1_tokens
-        assert (np.array(cand2_tokens) == "<candidate2>").all(), cand2_tokens
 
         # get the exclusive encodings of cand1 and cand2
-        aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs)
+        aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs, aim_sh=self.aim_sh, aim_ex=self.aim_ex)
         left_sim = F.cosine_similarity(source_encs, cand1_encs)
         right_sim = F.cosine_similarity(source_encs, cand2_encs)
-        left_scores = scores[:, 0]
-        right_scores = scores[:, 1]
 
         # shapes are all equal
-        assert left_sim.shape == right_sim.shape, (left_sim.shape, right_sim.shape)
-        assert left_scores.shape == right_scores.shape, (left_scores.shape, right_scores.shape)
-        assert left_sim.shape == left_scores.shape, (left_sim.shape, left_scores.shape)
-        dif_scores = left_scores - right_scores
-
-        # different loss types
-        if self.loss_type == "triplet":
-            # 1. triplet ranking loss
-            dif_scores_sign = torch.sign(dif_scores)
-            dif_sim = left_sim - right_sim
-            loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
-        elif self.loss_type == "BCE":
-            # 2. BCE Loss
-            left_labels = (dif_scores > 0).float()
-            right_labels = (dif_scores < 0).float()
-            loss = torch.tensor(0.0, device=left_sim.device)
-            loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
-            loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
-            loss /= 2
-        elif self.loss_type == "MSE":
-            # 3. MSE Loss
-            loss = F.mse_loss(left_sim - right_sim, dif_scores)
-        else:
-            raise ValueError(f"Unknown loss type: {self.loss_type}")
+        if self.aim_cls:
+            dif_scores = scores[:, 0] - scores[:, 1]
+            # different loss types
+            if self.loss_type == "triplet":
+                # 1. triplet ranking loss
+                dif_scores_sign = torch.sign(dif_scores)
+                dif_sim = left_sim - right_sim
+                loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
+            elif self.loss_type == "BCE":
+                # 2. BCE Loss
+                left_labels = (dif_scores > 0).float()
+                right_labels = (dif_scores < 0).float()
+                loss = torch.tensor(0.0, device=left_sim.device)
+                loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
+                loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
+                loss /= 2
+            elif self.loss_type == "MSE":
+                # 3. MSE Loss
+                loss = F.mse_loss(left_sim - right_sim, dif_scores)
+            else:
+                raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += aux_loss
 
         left_sim = left_sim.view(original_shape)
         right_sim = right_sim.view(original_shape)
         pred_probs = left_sim - right_sim
         outputs = {
-            "loss": loss,
+            "loss": aux_loss,
             "preds": pred_probs,
         }
         return outputs
@@ -514,6 +493,10 @@ class CrossCompareReranker(nn.Module):
             # 1. top bottom sampling
             pos_idx = sorted_idx[:, :n_pair]
             neg_idx = sorted_idx[:, -n_pair:]
+        elif sampling_mode == "random":
+            # 2. random sampling
+            pos_idx = torch.randint(0, n_candidates, (batch_size, n_pair), device=device)
+            neg_idx = torch.randint(0, n_candidates, (batch_size, n_pair), device=device)
         elif sampling_mode == "poisson_dynamic":
             # 2. using rank dif as difficulty measure function
             self.args['training_steps'] += batch_size
@@ -589,12 +572,12 @@ class CrossCompareReranker(nn.Module):
 
                 n_pair = min(self.num_pos, self.num_neg)
                 left_idx, right_idx = self.sampling(scores, n_pair, device, self.sub_sampling_mode)
+                batch_idx = torch.arange(batch_size).unsqueeze(1)
 
-                candidate_pair_ids = candidate_pair_ids[torch.arange(batch_size).unsqueeze(1), left_idx, right_idx] # [batch_size, n_pair, candidate_len]
-                candidate_pair_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), left_idx, right_idx] # [batch_size, n_pair, candidate_len]
-
-                left_scores = scores[torch.arange(batch_size).unsqueeze(1), left_idx]
-                right_scores = scores[torch.arange(batch_size).unsqueeze(1), right_idx]
+                candidate_pair_ids = candidate_pair_ids[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
+                candidate_pair_attention_mask = candidate_pair_attention_mask[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
+                left_scores = scores[batch_idx, left_idx]
+                right_scores = scores[batch_idx, right_idx]
                 outputs = self._forward(
                     candidate_pair_ids,
                     candidate_pair_attention_mask,

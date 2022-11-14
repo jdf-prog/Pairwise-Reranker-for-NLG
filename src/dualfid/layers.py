@@ -198,6 +198,8 @@ class MIDisentangledLayer(nn.Module):
         self.sh_beta = sh_beta
         self.ex_alpha = ex_alpha
         self.ex_beta = ex_beta
+        self.sh_lambda = sh_lambda
+        self.ex_lambda = ex_lambda
         # layer for compute shared embedding
         self.sh_layer = HeadLayer(self.hidden_size)
         # layer for compute exclusive embedding
@@ -210,7 +212,7 @@ class MIDisentangledLayer(nn.Module):
         self.l_MI_sh = MILayer(self.hidden_size, n_units=self.n_units)
         self.l_MI_ex = MILayer(self.hidden_size, n_units=self.n_units)
 
-    def forward(self, X, Y):
+    def forward(self, X, Y, aim_sh=True, aim_ex=True):
         """
             Get the exclusive encodings of cand1 and cand2
         Args:
@@ -232,46 +234,50 @@ class MIDisentangledLayer(nn.Module):
             torch.arange(batch_size)[rand_int:],
             torch.arange(batch_size)[:rand_int]
         ])
+        G_SH_MI = L_SH_MI = G_EX_MI = L_EX_MI = 0
+        SH_TERM = EX_TERM = 0
+        LOSS = torch.tensor(0.0).to(X.device)
 
-        # compute shared cross local and golbal MI; to maximize
-        MI_G_sh_XY_pos = self.g_MI_sh(X, sh_Y)
-        MI_G_sh_YX_pos = self.g_MI_sh(Y, sh_X)
-        MI_L_sh_XY_pos = self.l_MI_sh(X, sh_Y)
-        MI_L_sh_YX_pos = self.l_MI_sh(Y, sh_X)
-        MI_G_sh_XY_neg = self.g_MI_sh(X, sh_Y[random_idx])
-        MI_G_sh_YX_neg = self.g_MI_sh(Y, sh_X[random_idx])
-        MI_L_sh_XY_neg = self.l_MI_sh(X, sh_Y[random_idx])
-        MI_L_sh_YX_neg = self.l_MI_sh(Y, sh_X[random_idx])
-        G_SH_MI = self.sh_alpha * (MI_G_sh_XY_pos + MI_G_sh_YX_pos - MI_G_sh_XY_neg - MI_G_sh_YX_neg).mean()
-        L_SH_MI = self.sh_beta * (MI_L_sh_XY_pos + MI_L_sh_YX_pos - MI_L_sh_XY_neg - MI_L_sh_YX_neg).mean()
+        if aim_sh:
+            # compute shared cross local and golbal MI; to maximize
+            MI_G_sh_XY_pos = self.g_MI_sh(X, sh_Y)
+            MI_G_sh_YX_pos = self.g_MI_sh(Y, sh_X)
+            MI_L_sh_XY_pos = self.l_MI_sh(X, sh_Y)
+            MI_L_sh_YX_pos = self.l_MI_sh(Y, sh_X)
+            MI_G_sh_XY_neg = self.g_MI_sh(X, sh_Y[random_idx])
+            MI_G_sh_YX_neg = self.g_MI_sh(Y, sh_X[random_idx])
+            MI_L_sh_XY_neg = self.l_MI_sh(X, sh_Y[random_idx])
+            MI_L_sh_YX_neg = self.l_MI_sh(Y, sh_X[random_idx])
+            G_SH_MI = self.sh_alpha * (MI_G_sh_XY_pos + MI_G_sh_YX_pos - MI_G_sh_XY_neg - MI_G_sh_YX_neg).mean()
+            L_SH_MI = self.sh_beta * (MI_L_sh_XY_pos + MI_L_sh_YX_pos - MI_L_sh_XY_neg - MI_L_sh_YX_neg).mean()
+            # same shared loss; to minimize
+            SH_TERM = (sh_X - sh_Y).mean()
+            SH_LOSS = self.sh_lambda * (SH_TERM) - (G_SH_MI + L_SH_MI)
+            LOSS += SH_LOSS
 
-        # compute exclusive cross local and golbal MI; to maximize
-        MI_G_ex_XY_pos = self.g_MI_ex(X, ex_Y)
-        MI_G_ex_YX_pos = self.g_MI_ex(Y, ex_X)
-        MI_L_ex_XY_pos = self.l_MI_ex(X, ex_Y)
-        MI_L_ex_YX_pos = self.l_MI_ex(Y, ex_X)
-        MI_G_ex_XY_neg = self.g_MI_ex(X, ex_Y[random_idx])
-        MI_G_ex_YX_neg = self.g_MI_ex(Y, ex_X[random_idx])
-        MI_L_ex_XY_neg = self.l_MI_ex(X, ex_Y[random_idx])
-        MI_L_ex_YX_neg = self.l_MI_ex(Y, ex_X[random_idx])
-        G_EX_MI = self.ex_alpha * (MI_G_ex_XY_pos + MI_G_ex_YX_pos - MI_G_ex_XY_neg - MI_G_ex_YX_neg).mean()
-        L_EX_MI = self.ex_beta * (MI_L_ex_XY_pos + MI_L_ex_YX_pos - MI_L_ex_XY_neg - MI_L_ex_YX_neg).mean()
+        if aim_ex:
+            # compute exclusive cross local and golbal MI; to maximize
+            MI_G_ex_XY_pos = self.g_MI_ex(X, ex_Y)
+            MI_G_ex_YX_pos = self.g_MI_ex(Y, ex_X)
+            MI_L_ex_XY_pos = self.l_MI_ex(X, ex_Y)
+            MI_L_ex_YX_pos = self.l_MI_ex(Y, ex_X)
+            MI_G_ex_XY_neg = self.g_MI_ex(X, ex_Y[random_idx])
+            MI_G_ex_YX_neg = self.g_MI_ex(Y, ex_X[random_idx])
+            MI_L_ex_XY_neg = self.l_MI_ex(X, ex_Y[random_idx])
+            MI_L_ex_YX_neg = self.l_MI_ex(Y, ex_X[random_idx])
+            G_EX_MI = self.ex_alpha * (MI_G_ex_XY_pos + MI_G_ex_YX_pos - MI_G_ex_XY_neg - MI_G_ex_YX_neg).mean()
+            L_EX_MI = self.ex_beta * (MI_L_ex_XY_pos + MI_L_ex_YX_pos - MI_L_ex_XY_neg - MI_L_ex_YX_neg).mean()
+            # compute adversial loss TODO: check this
+            scores_X_pos = self.discriminator(sh_X, ex_X)
+            scores_X_neg = self.discriminator(sh_X, ex_X[random_idx])
+            scores_Y_pos = self.discriminator(sh_Y, ex_Y)
+            scores_Y_neg = self.discriminator(sh_Y, ex_Y[random_idx])
+            scores_X_pos = -torch.log(1 - scores_X_pos)
+            scores_X_neg = -torch.log(scores_X_neg)
+            scores_Y_pos = -torch.log(1 - scores_Y_pos)
+            scores_Y_neg = -torch.log(scores_Y_neg)
+            EX_TERM = (scores_X_pos + scores_X_neg + scores_Y_pos + scores_Y_neg).mean()
+            EX_LOSS = self.ex_lambda * (EX_TERM) - (G_EX_MI + L_EX_MI)
+            LOSS += EX_LOSS
 
-        # same shared loss; to minimize
-        SH_TERM = (sh_X - sh_Y).mean()
-
-        # compute adversial loss TODO: check this
-        scores_X_pos = self.discriminator(sh_X, ex_X)
-        scores_X_neg = self.discriminator(sh_X, ex_X[random_idx])
-        scores_Y_pos = self.discriminator(sh_Y, ex_Y)
-        scores_Y_neg = self.discriminator(sh_Y, ex_Y[random_idx])
-
-        scores_X_pos = -torch.log(1 - scores_X_pos)
-        scores_X_neg = -torch.log(scores_X_neg)
-        scores_Y_pos = -torch.log(1 - scores_Y_pos)
-        scores_Y_neg = -torch.log(scores_Y_neg)
-
-        EX_TERM = (scores_X_pos + scores_X_neg + scores_Y_pos + scores_Y_neg).mean()
-
-        LOSS = SH_TERM + EX_TERM - (G_SH_MI + L_SH_MI + G_EX_MI + L_EX_MI)
         return LOSS, ex_X, ex_Y
