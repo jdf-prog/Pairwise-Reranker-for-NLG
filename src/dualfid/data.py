@@ -67,6 +67,11 @@ def load_data(data_path, args, mode='train'):
         if len(item['candidates']) == 0:
             raise ValueError("No candidates left after filtering")
 
+        for candidate in item['candidates']:
+            candidate['scores'] = {
+                metric: candidate['scores'][metric] for metric in args.metrics
+            }
+
     for k, example in enumerate(data):
         if not 'id' in example:
             example['id'] = k

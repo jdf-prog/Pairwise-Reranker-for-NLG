@@ -266,6 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_train_data_size", type=int, default=25000)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)
     parser.add_argument("--max_predict_data_size", type=int, default=-1)
+    parser.add_argument("--using_metrics", type=str, default="rouge1+rouge2+rougeLsum")
 
     # running config
     parser.add_argument("--seed", type=int, default=42)
@@ -347,6 +348,7 @@ if __name__ == "__main__":
     args.candidate_generation_methods = args.candidate_generation_method.split('+')
     args.candidate_models = args.candidate_model.split('+')
     args.local_rank = os.environ.get("LOCAL_RANK", args.local_rank)
+    args.metrics = args.using_metrics.split('+')
 
     # prepare for curriculum learning
     if args.curriculum_learning:

@@ -33,9 +33,9 @@ train_reranker.py \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
-    --n_candidates 30 \
+    --n_candidates 15 \
     --candidate_model "opus_mt" \
-    --candidate_generation_method "diverse_beam_search+beam_search" \
+    --candidate_generation_method "beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 1 \
@@ -50,6 +50,7 @@ train_reranker.py \
     --max_train_data_size 50000 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
+    --using_metrics "bleu"
     # --evaluate_first_step True \
     # --do_predict False \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \

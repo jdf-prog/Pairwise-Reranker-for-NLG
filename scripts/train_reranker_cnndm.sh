@@ -49,6 +49,7 @@ train_reranker.py \
     --max_train_data_size 20000 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
+    --using_metrics "rouge1+rouge2+rougeLsum" \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 100 \

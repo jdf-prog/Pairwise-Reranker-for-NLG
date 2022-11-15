@@ -60,8 +60,6 @@ class SCR(nn.Module):
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
         self.loss_type = self.args["loss_type"]
-        self.localize = self.args.get("localize", False)
-        self.localize_ratio = self.args.get("localize_ratio", 0.5)
         self.drop_out = self.args.get("drop_out", 0.05)
 
         # LM
@@ -225,8 +223,6 @@ class DualReranker(nn.Module):
         self.num_pos = self.args["num_pos"]
         self.num_neg = self.args["num_neg"]
         self.loss_type = self.args["loss_type"]
-        self.localize = self.args["localize"]
-        self.localize_ratio = self.args["localize_ratio"]
 
         # LM
         self.source_encoder = pretrained_model
@@ -313,17 +309,6 @@ class DualReranker(nn.Module):
         # subsampling
         if self.training:
             batch_size, n_candidates, seq_len = candidate_ids.shape
-            if self.localize and self.step % 50 >= 40:
-                with torch.no_grad():
-                    pred_scores, _ = self._forward(
-                        source_ids, source_attention_mask,
-                        target_ids, target_attention_mask,
-                        candidate_ids, candidate_attention_mask)
-                    selected_idx = sub_sampling("top", self.num_pos, self.num_neg, self.localize_ratio, pred_scores.unsqueeze(-1))
-                    input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-                    attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-                    scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-                    labels = labels[torch.arange(batch_size).unsqueeze(-1), selected_idx]
             selected_idx = sub_sampling(self.sub_sampling_mode, self.num_pos, self.num_neg, self.sub_sampling_ratio, scores)
             input_ids = input_ids[torch.arange(batch_size).unsqueeze(-1), selected_idx]
             attention_mask = attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
@@ -386,9 +371,6 @@ class CrossCompareReranker(nn.Module):
         self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.loss_type = self.args["loss_type"]
         self.drop_out = self.args.get("drop_out", 0.05)
-        self.aim_sh = self.args.get("aim_sh", True) # aim at the shared embedding learning
-        self.aim_ex = self.args.get("aim_ex", False) # aim at the exclusive embedding learning
-        self.aim_cls = self.args.get("aim_cls", False) # aim at classification
 
         # LM
         self.pretrained_model = pretrained_model
@@ -405,6 +387,31 @@ class CrossCompareReranker(nn.Module):
         self.args['training_data_size'] = self.args.get('training_data_size', 0)
         self.args['n_candidates'] = self.args.get('n_candidates', -1)
 
+    def compute_cls_loss(self, left_sim, right_sim, left_score, right_scores):
+        device = left_sim.device
+        # shapes are all equal
+        dif_scores = left_score - right_scores
+        # different loss types
+        if self.loss_type == "triplet":
+            # 1. triplet ranking loss
+            dif_scores_sign = torch.sign(dif_scores)
+            dif_sim = left_sim - right_sim
+            cls_loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
+        elif self.loss_type == "BCE":
+            # 2. BCE Loss
+            left_labels = (dif_scores > 0).float()
+            right_labels = (dif_scores < 0).float()
+            cls_loss = torch.tensor(0.0, device=device)
+            cls_loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
+            cls_loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
+            cls_loss /= 2
+        elif self.loss_type == "MSE":
+            # 3. MSE Loss
+            cls_loss = F.mse_loss(left_sim - right_sim, dif_scores)
+        else:
+            raise ValueError(f"Unknown loss type: {self.loss_type}")
+        return cls_loss
+
     def _forward(
         self,
         input_ids,
@@ -420,6 +427,7 @@ class CrossCompareReranker(nn.Module):
         Returns:
             pred_probs: [*]
         """
+        device = input_ids.device
         original_shape = input_ids.shape[:-1]
         seq_len = input_ids.shape[-1]
         input_ids = input_ids.view(-1, seq_len)
@@ -434,46 +442,23 @@ class CrossCompareReranker(nn.Module):
         assert sep_token_idx.sum(-1).eq(3).all(), sep_token_idx.sum(-1)
         sep_token_idx = sep_token_idx.nonzero()[:, 1].reshape(-1, 3)
         encs = outputs.last_hidden_state
-
         # get the special token <source> and <candidate>
+        loss = torch.tensor(0.0, device=device)
         source_encs = encs[:, 1, :]
         cand1_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1, :]
         cand2_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1, :]
-
         # get the exclusive encodings of cand1 and cand2
-        aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs, aim_sh=self.aim_sh, aim_ex=self.aim_ex)
+        aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs)
         left_sim = F.cosine_similarity(source_encs, cand1_encs)
         right_sim = F.cosine_similarity(source_encs, cand2_encs)
-
-        # shapes are all equal
-        if self.aim_cls:
-            dif_scores = scores[:, 0] - scores[:, 1]
-            # different loss types
-            if self.loss_type == "triplet":
-                # 1. triplet ranking loss
-                dif_scores_sign = torch.sign(dif_scores)
-                dif_sim = left_sim - right_sim
-                loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
-            elif self.loss_type == "BCE":
-                # 2. BCE Loss
-                left_labels = (dif_scores > 0).float()
-                right_labels = (dif_scores < 0).float()
-                loss = torch.tensor(0.0, device=left_sim.device)
-                loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
-                loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
-                loss /= 2
-            elif self.loss_type == "MSE":
-                # 3. MSE Loss
-                loss = F.mse_loss(left_sim - right_sim, dif_scores)
-            else:
-                raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += aux_loss
+        loss += self.compute_cls_loss(left_sim, right_sim, scores[:, 0], scores[:, 1])
 
         left_sim = left_sim.view(original_shape)
         right_sim = right_sim.view(original_shape)
         pred_probs = left_sim - right_sim
         outputs = {
-            "loss": aux_loss,
+            "loss": loss,
             "preds": pred_probs,
         }
         return outputs
@@ -585,23 +570,13 @@ class CrossCompareReranker(nn.Module):
                 )
 
             else:
-                # candidate_pair_ids = candidate_pair_ids[:,:-1][:,:,:-1] # debug
-                # candidate_pair_attention_mask = candidate_pair_attention_mask[:,:-1][:,:,:-1] # debug
-                # scores = scores[:,:-1] # debug
                 batch_size, n_candidates, _, candidate_len = candidate_pair_ids.shape
                 scores = torch.mean(scores, dim=-1) # [batch_size, n_candidates]
                 sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates]
                 ranks = torch.zeros_like(sorted_idx)
                 ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidates, device=device)
-                # print("scores", scores)
-                # print("sorted_idx", sorted_idx)
-                # print("ranks", ranks)
-                # print("-"*30)
 
-                # NOTE: dofferent comparison order
                 permu = torch.randperm(n_candidates).repeat(batch_size, 1).to(device) # [batch_size, n_candidates] random
-                # permu = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates] from better to worse
-                # permu = torch.argsort(scores, dim=1, descending=False) # [batch_size, n_candidates] from worse to better
 
                 cur_idx = permu[:, 0]
                 loss = torch.tensor(0.0).to(device)
@@ -980,11 +955,3 @@ def sub_sampling(mode, num_pos, num_neg, ratio, scores):
         raise NotImplementedError
 
     return selected_idx
-
-def importance_sampling(scores, ratio):
-    """
-    Args:
-        scores: [batch_size, n_pairs, n_task]
-        ratio: ratio of positive samples
-    """
-    pass

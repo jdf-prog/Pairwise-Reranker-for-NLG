@@ -53,6 +53,7 @@ train_reranker.py \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --do_predict False \
+    --using_metrics "bleu+cider" \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 100 \

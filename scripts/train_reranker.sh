@@ -1,9 +1,8 @@
 #!/bin/bash
-#SBATCH --time=4:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --nodelist=ink-molly
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2080:1
 #SBATCH -n 1
 
 
@@ -48,8 +47,6 @@ cd ../
 #     --overwrite_output_dir True \
 #     --loss_type "MoE_BCE" \
 #     --sub_sampling_mode "top_bottom" \
-#     --localize True \
-#     --localize_ratio 0.4 \
 #     --sub_sampling_ratio 0.1 \
 #     --num_pos 1 \
 #     --num_neg 1 \
@@ -86,8 +83,6 @@ cd ../
 #     --sub_sampling_ratio "0.3" \
 #     --num_pos 2 \
 #     --num_neg 2 \
-#     --localize True \
-#     --localize_ratio 0.3 \
 
 
 # # dual ListMLE
@@ -161,7 +156,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug" \
+    --run_name "debug_try_disentangle" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -173,16 +168,17 @@ train_reranker.py \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps 16 \
-    --num_train_epochs 3 \
+    --num_train_epochs 2 \
     --overwrite_output_dir True \
-    --num_pos 4 \
-    --num_neg 4 \
+    --num_pos 2 \
+    --num_neg 2 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
     --evaluation_strategy "steps" \
     --save_strategy "steps" \
     --eval_steps 100 \
     --save_steps 100 \
+    --save_total_limit 4 \
     # --evaluate_first_step True \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
