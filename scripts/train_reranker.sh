@@ -51,7 +51,7 @@ cd ../
 #     --num_pos 1 \
 #     --num_neg 1 \
 #     --learning_rate 1e-5 \
-#     # --evaluate_first_step True \
+#     # --evaluate_before_training True \
 #     # --load_checkpoint "./outputs/scr/roberta-large/basic_beam_30/checkpoint-1930" \
 
 
@@ -140,7 +140,7 @@ cd ../
 #     --overwrite_output_dir True \
 #     --num_pos 4 \
 #     --num_neg 4 \
-#     --evaluate_first_step True \
+#     --evaluate_before_training True \
 #     # --evaluation_strategy "steps" \
 #     # --save_strategy "steps" \
 #     # --eval_steps 10 \
@@ -182,7 +182,7 @@ train_reranker.py \
     --save_total_limit 10 \
     --learning_rate 1e-5 \
     # --max_train_data_size 12000 \
-    # --evaluate_first_step True \
+    # --evaluate_before_training True \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
     # --do_train False \
@@ -223,7 +223,7 @@ train_reranker.py \
 #     --curriculum_size 5000 \
 #     --num_curriculum 50 \
 #     --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
-#     --evaluate_first_step True \
+#     --evaluate_before_training True \
 #     --evaluation_strategy "steps" \
 #     --save_strategy "steps" \
 #     --eval_steps 1000 \

@@ -51,7 +51,7 @@ train_reranker.py \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --using_metrics "bleu" \
-    # --evaluate_first_step True \
+    # --evaluate_before_training True \
     # --do_predict False \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
     # --evaluation_strategy "steps" \

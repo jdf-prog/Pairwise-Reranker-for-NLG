@@ -58,7 +58,7 @@ train_reranker.py \
     # --save_strategy "steps" \
     # --eval_steps 100 \
     # --save_steps 100 \
-    # --evaluate_first_step True \
+    # --evaluate_before_training True \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
     # --do_train False \
     # --do_eval False \

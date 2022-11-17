@@ -172,7 +172,7 @@ def main(args):
             wandb.init(project="Fusion in Decoder", group=args.fid_type, name=args.run_name)
             wandb.config.update(args)
 
-        if args.evaluate_first_step:
+        if args.evaluate_before_training:
             metrics = trainer.evaluate()
             logging.info(f"Evaluate first step: \n{metrics}")
 
@@ -279,7 +279,7 @@ if __name__ == "__main__":
     # evaluation hyperparameters
     parser.add_argument("--eval_data_path", type=str, default=None)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=8)
-    parser.add_argument("--evaluate_first_step", type=str2bool, default=False)
+    parser.add_argument("--evaluate_before_training", type=str2bool, default=False)
     parser.add_argument("--evaluation_strategy", type=str, choices=[
         "steps", "epoch", "no"
     ], default="epoch")
