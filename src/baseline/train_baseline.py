@@ -184,8 +184,8 @@ if __name__ == '__main__':
         "Translate Chinese to English: ",
         "Generate a sentence with the following words: "
     ]
-    per_device_train_batch_size = [16, 16, 16, 16, 128]
-    gradient_accumulation_steps = [16, 16, 16, 16, 2]
+    per_device_train_batch_size = [4, 4, 4, 4, 128]
+    gradient_accumulation_steps = [64, 64, 64, 64, 2]
     num_train_epochs = [10, 10, 15, 10, 10]
 
 

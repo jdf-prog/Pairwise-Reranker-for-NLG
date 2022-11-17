@@ -2,7 +2,7 @@
 #SBATCH --time=16:00:00
 #SBATCH --job-name=train_baseline
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:6000:1
 #SBATCH -n 1
 
 nvidia-smi
