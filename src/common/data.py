@@ -10,7 +10,7 @@ from common.dataset import CustomDataset
 
 
 
-def load_raw_dataset(dataset_name, set_name):
+def load_raw_dataset(dataset_name, set_name, partition=None):
     """
         Load from the specified dataset. Note that the data path is hard-coded here!
     Args:
@@ -20,16 +20,25 @@ def load_raw_dataset(dataset_name, set_name):
         sources: the list of sources
         targets: the list of targets
     """
+    assert set_name in ['train', 'val', 'test']
+    assert partition is None or partition in ['1_half', '2_half', 'full']
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
     file_path = dataset_folder / f'{set_name}.jsonl'
     ds = CustomDataset.from_jsonl(file_path)
     sources = [item['source'] for item in ds]
     targets = [item['target'] for item in ds]
+    if partition in ['1_half', '2_half']:
+        if partition == '1_half':
+            sources = sources[:len(sources) // 2]
+            targets = targets[:len(targets) // 2]
+        else:
+            sources = sources[len(sources) // 2:]
+            targets = targets[len(targets) // 2:]
     return sources, targets
 
 
-def save_raw_dataset(dataset_name, set_name, sources, targets):
+def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False):
     """
         Save the raw dataset to pkl files.
         Note that the data path is hard-coded here!
@@ -42,6 +51,11 @@ def save_raw_dataset(dataset_name, set_name, sources, targets):
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
     file_path = dataset_folder / f'{set_name}.jsonl'
+    if shuffle:
+        print("Shuffling the dataset...")
+        indices = torch.randperm(len(sources))
+        sources = [sources[i] for i in indices]
+        targets = [targets[i] for i in indices]
     ds = CustomDataset.from_raw(sources, targets)
     ds.to_jsonl(file_path)
 

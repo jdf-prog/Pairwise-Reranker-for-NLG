@@ -30,6 +30,7 @@ parser.add_argument('--dataset', type=str, default = "cnndm",
                     choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
 
 parser.add_argument('--max_size', type = int, default = 1000000)
+parser.add_argument('--shuffle', action='store_true')
 
 args = parser.parse_args()
 
@@ -97,7 +98,7 @@ def main(args):
         set_names = ["train", "val", "test"]
         idx = 0
         for set_name in set_names:
-            save_raw_dataset(args.dataset, set_name, set_sources[idx], set_target[idx])
+            save_raw_dataset(args.dataset, set_name, set_sources[idx], set_target[idx], args.shuffle)
             idx += 1
     else:
         for x in sets:
@@ -111,7 +112,7 @@ def main(args):
                 sources = [x[args.source_key] for x in dataset_set][:args.max_size]
                 targets = [x[args.target_key] for x in dataset_set][:args.max_size]
             sources = process_sources(sources)
-            save_raw_dataset(args.dataset, set_name, sources, targets)
+            save_raw_dataset(args.dataset, set_name, sources, targets, args.shuffle)
 
 def seed_everything(seed=42):
     random.seed(seed)
