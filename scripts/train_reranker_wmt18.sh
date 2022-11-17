@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=72:00:00
+#SBATCH --time=48:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
@@ -35,7 +35,7 @@ train_reranker.py \
     --test_data_path ${test_data_path} \
     --n_candidates 15 \
     --candidate_model "opus_mt" \
-    --candidate_generation_method "beam_search" \
+    --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 1 \
@@ -43,14 +43,14 @@ train_reranker.py \
     --gradient_accumulation_steps 16 \
     --num_train_epochs 3 \
     --overwrite_output_dir True \
-    --num_pos 2 \
-    --num_neg 2 \
+    --num_pos 1 \
+    --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
     --max_train_data_size 50000 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
-    --using_metrics "bleu"
+    --using_metrics "bleu" \
     # --evaluate_first_step True \
     # --do_predict False \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \

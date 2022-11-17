@@ -1,5 +1,5 @@
 sbatch train_reranker_cnndm.sh
-sbatch train_reranker_commongen.sh
+# sbatch train_reranker_commongen.sh
 sbatch train_reranker_wmt18.sh
 sbatch train_reranker_xsum.sh
 

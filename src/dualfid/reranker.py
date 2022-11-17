@@ -21,7 +21,8 @@ from dualfid.loss import (
     p_ListMLE_loss,
     triplet_loss,
     triplet_loss_v2,
-    triplet_simcls_loss
+    triplet_simcls_loss,
+    ApproxNDCG_loss
 )
 from copy import deepcopy
 import transformers.trainer
@@ -178,6 +179,12 @@ class SCR(nn.Module):
         elif self.loss_type == "triplet_simcls":
             target_pred_scores = self._forawrd(target_ids, target_attention_mask)[0] # [batch_size, n_tasks]
             loss = triplet_simcls_loss(pred_scores, target_pred_scores, scores)
+        elif self.loss_type == "ApproxNDCG":
+            loss = ApproxNDCG_loss(pred_scores, scores)
+        else:
+            raise ValueError("Unknown loss type: {}".format(self.loss_type))
+
+
         loss += aux_loss
         # return loss and logits
         pred_scores = pred_scores.reshape(batch_size, -1, n_candidates).transpose(1, 2) # [batch_size, n_candidates, n_tasks]
@@ -381,24 +388,31 @@ class CrossCompareReranker(nn.Module):
 
         self.disentangle_layer = MIDisentangledLayer(self.hidden_size)
 
+        self.head_layer = nn.Linear(4 * self.hidden_size, 1)
+
 
         # parameters for dynamic epochs
         self.args['training_steps'] = self.args.get('training_steps', 0)
         self.args['training_data_size'] = self.args.get('training_data_size', 0)
         self.args['n_candidates'] = self.args.get('n_candidates', -1)
 
-    def compute_cls_loss(self, left_sim, right_sim, left_score, right_scores):
-        device = left_sim.device
-        # shapes are all equal
+    def compute_loss(self, source_encs, cand1_encs, cand2_encs, left_score, right_scores):
+        device = source_encs.device
+        loss = torch.tensor(0.0).to(source_encs.device)
+        # aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs)
+        # loss += aux_loss
+        left_sim = F.cosine_similarity(source_encs, cand1_encs)
+        right_sim = F.cosine_similarity(source_encs, cand2_encs)
+        preds = left_sim - right_sim
         dif_scores = left_score - right_scores
-        # different loss types
         if self.loss_type == "triplet":
-            # 1. triplet ranking loss
             dif_scores_sign = torch.sign(dif_scores)
-            dif_sim = left_sim - right_sim
-            cls_loss = torch.max(torch.zeros_like(dif_sim), torch.abs(dif_scores) - dif_scores_sign * dif_sim).mean()
+            cls_loss = torch.max(torch.zeros_like(preds), torch.abs(dif_scores) - dif_scores_sign * preds).mean()
+            # add MSE loss
+            mse_loss = F.mse_loss(left_sim, left_score)
+            mse_loss += F.mse_loss(right_sim, right_scores)
+            cls_loss += mse_loss
         elif self.loss_type == "BCE":
-            # 2. BCE Loss
             left_labels = (dif_scores > 0).float()
             right_labels = (dif_scores < 0).float()
             cls_loss = torch.tensor(0.0, device=device)
@@ -406,17 +420,18 @@ class CrossCompareReranker(nn.Module):
             cls_loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
             cls_loss /= 2
         elif self.loss_type == "MSE":
-            # 3. MSE Loss
-            cls_loss = F.mse_loss(left_sim - right_sim, dif_scores)
+            cls_loss = F.mse_loss(preds, dif_scores)
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
-        return cls_loss
+        loss += cls_loss
+        return loss, preds
 
     def _forward(
         self,
         input_ids,
         attention_mask,
         scores,
+        reduce="mean"
     ):
         """
             Compute scores for each candidate pairs
@@ -444,22 +459,35 @@ class CrossCompareReranker(nn.Module):
         encs = outputs.last_hidden_state
         # get the special token <source> and <candidate>
         loss = torch.tensor(0.0, device=device)
-        source_encs = encs[:, 1, :]
-        cand1_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1, :]
-        cand2_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1, :]
-        # get the exclusive encodings of cand1 and cand2
-        aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs)
-        left_sim = F.cosine_similarity(source_encs, cand1_encs)
-        right_sim = F.cosine_similarity(source_encs, cand2_encs)
-        loss += aux_loss
-        loss += self.compute_cls_loss(left_sim, right_sim, scores[:, 0], scores[:, 1])
+        if reduce=="special":
+            source_encs = encs[:, 1, :]
+            cand1_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1, :]
+            cand2_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1, :]
+        elif reduce=="mean":
+            source_encs = []
+            cand1_encs = []
+            cand2_encs = []
+            for i in range(encs.shape[0]):
+                source_encs.append(torch.mean(encs[i, 1:sep_token_idx[i, 0], :], dim=0))
+                cand1_encs.append(torch.mean(encs[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1], :], dim=0))
+                cand2_encs.append(torch.mean(encs[i, sep_token_idx[i, 1]+1:sep_token_idx[i, 2], :], dim=0))
+            source_encs = torch.stack(source_encs, dim=0)
+            cand1_encs = torch.stack(cand1_encs, dim=0)
+            cand2_encs = torch.stack(cand2_encs, dim=0)
+        else:
+            raise ValueError(f"Unknown reduce type: {reduce}")
 
-        left_sim = left_sim.view(original_shape)
-        right_sim = right_sim.view(original_shape)
-        pred_probs = left_sim - right_sim
+
+        # get the exclusive encodings of cand1 and cand2
+        loss, pred_probs = self.compute_loss(source_encs, cand1_encs, cand2_encs, scores[:, 0], scores[:, 1])
+
+        pred_probs = pred_probs.view(*original_shape)
         outputs = {
             "loss": loss,
             "preds": pred_probs,
+            "source_encs": source_encs,
+            "cand1_encs": cand1_encs,
+            "cand2_encs": cand2_encs,
         }
         return outputs
 
@@ -476,6 +504,13 @@ class CrossCompareReranker(nn.Module):
         # NOTE: different sampling strategy
         if sampling_mode == "top_bottom":
             # 1. top bottom sampling
+            # self.args['training_steps'] += batch_size
+            # cur_stage = self.args['training_steps'] // (self.args['training_data_size'] // self.args['n_candidates'] * 2)
+            # dif_rank = n_candidates - cur_stage
+            # rand_int = random.randint(0, cur_stage)
+            # sub_sorted_idx = sorted_idx[:, rand_int:rand_int+dif_rank]
+            # pos_idx = sub_sorted_idx[:, :n_pair]
+            # neg_idx = sub_sorted_idx[:, -n_pair:]
             pos_idx = sorted_idx[:, :n_pair]
             neg_idx = sorted_idx[:, -n_pair:]
         elif sampling_mode == "random":
@@ -547,6 +582,7 @@ class CrossCompareReranker(nn.Module):
             )
 
         elif candidate_pair_ids.dim() == 4:
+
             # passing in as group
             if self.training:
                 # subsampling
@@ -895,7 +931,7 @@ def sub_sampling(mode, num_pos, num_neg, ratio, scores):
         selected_idx: [batch_size, n_pos+n_neg] or [batch_size, n_candidates * ratio]
 
     """
-    batch_size, n_candidates = scores.shape
+    batch_size, n_candidates, n_task = scores.shape
 
     if mode == "uniform":
         sorted_idx = torch.argsort(torch.sum(scores, dim=-1), dim=1, descending=True)
@@ -949,8 +985,6 @@ def sub_sampling(mode, num_pos, num_neg, ratio, scores):
             idx = unique_idx[idx]
             selected_idx.append(idx)
         selected_idx = torch.tensor(selected_idx)
-    elif mode == "importance":
-        selected_idx = importance_sampling(scores, ratio)
     else:
         raise NotImplementedError
 

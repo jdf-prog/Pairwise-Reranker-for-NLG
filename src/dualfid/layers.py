@@ -128,7 +128,7 @@ class Discriminator(nn.Module):
         return joint_outs
 
 class HeadLayer(nn.Module):
-    def __init__(self, input_size, output_size, hidden_size, drop_out=0.03):
+    def __init__(self, input_size, hidden_size, output_size, drop_out=0.03):
         super(HeadLayer, self).__init__()
         self.input_size = input_size
         self.output_size = output_size

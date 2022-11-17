@@ -146,7 +146,7 @@ class MoE(nn.Module):
         top_k_indices = top_indices[:, :self.k]
         top_k_gates = self.softmax(top_k_logits)
 
-        zeros = torch.zeros_like(logits, requires_grad=True)
+        zeros = torch.zeros(logits.shape, requires_grad=True, device=logits.device)
         gates = zeros.scatter(1, top_k_indices, top_k_gates)
 
         if train and self.k < self.num_experts:

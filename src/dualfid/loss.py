@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from sklearn.metrics import ndcg_score
 
 PADDED_Y_VALUE = -1
 PADDED_INDEX_VALUE = -1
@@ -176,12 +177,12 @@ def triplet_loss_v2(pred_scores, scores, temperature=1.0):
             ))
     return loss
 
-def triplet_simcls_loss(sim_mat, target_sim, sum_scores):
+def triplet_simcls_loss(sim_mat, target_sim, scores):
     """
     Args:
         sim_mat: [batch_size, n_candidates]
         target_sim: [batch_size]
-        sum_scores: [batch_size, n_candidates]
+        scores: [batch_size, n_candidates]
     Return:
         loss: [1]
     """
@@ -190,7 +191,7 @@ def triplet_simcls_loss(sim_mat, target_sim, sum_scores):
     gold_margin_loss = loss_func(target_sim.repeat(sim_mat.shape[1], 1).transpose(0, 1), sim_mat, torch.ones_like(sim_mat))
     loss += gold_margin_loss
     batch_size, n_candidates = sim_mat.shape
-    sorted_idx = torch.argsort(sum_scores, dim=1, descending=True) # [batch_size, n_candidates]
+    sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates]
     for i in range(n_candidates):
         for j in range(i+1, n_candidates):
             sim_mat_i = sim_mat[torch.arange(batch_size), sorted_idx[:, i]]
@@ -199,3 +200,72 @@ def triplet_simcls_loss(sim_mat, target_sim, sum_scores):
             margin_loss = loss_func(sim_mat_i, sim_mat_j, torch.ones_like(sim_mat_i))
             loss += margin_loss
     return loss
+
+def get_dcg(y_pred, y_true, k=10):
+    """
+    Args:
+        y_pred: [size]
+        y_true: [size]
+        k: int
+    Return:
+        dcg: [size]
+    """
+    sorted_idx = torch.argsort(y_pred, descending=True)
+    y_true = y_true[sorted_idx][:k]
+    y_pred = y_pred[sorted_idx][:k]
+    dcg = (torch.pow(2, y_true) - 1) / torch.log2(torch.arange(1, y_true.shape[0]+1, device=y_true.device) + 1)
+    return dcg
+
+def get_ndcg(scores, rels):
+    """
+    Args:
+        scores: [batch_size, n_candidates], computed by model
+        rels: [batch_size, n_candidates], relevance labels
+    """
+    batch_size, n_candidates = scores.shape
+    # compute dcg
+    dcg = [get_dcg(scores[i], rels[i]) for i in range(batch_size)]
+    dcg = torch.stack(dcg, dim=0)
+    # compute idcg
+    idcg = [get_dcg(rels[i], rels[i]) for i in range(batch_size)]
+    idcg = torch.stack(idcg, dim=0)
+    # compute ndcg
+    ndcg = dcg / idcg
+    return 1 - ndcg.mean()
+
+
+
+def ApproxNDCG_loss(scores, rels, temperature=0.1, k=10):
+    """
+    Args:
+        scores: [batch_size, n_candidates], computed by model
+        rels: [batch_size, n_candidates], relevance labels
+    """
+
+    def get_approxdcg(y_pred, y_true, k=10, temperature=0.5):
+        y_pred = y_pred[:k]
+        y_true = y_true[:k]
+        approxrank = []
+        for i in range(len(y_pred)):
+            y_pred_except_i = torch.cat([y_pred[:i], y_pred[i+1:]])
+            y_pred_except_i = (y_pred[i] - y_pred_except_i) / temperature
+            approxrank_i = 1 + y_pred_except_i.exp()
+            approxrank_i = 1 / approxrank_i
+            approxrank_i = approxrank_i.sum() + 1
+            approxrank.append(approxrank_i)
+        approxrank = torch.stack(approxrank, dim=0)
+
+        dcg = (torch.pow(2, y_true) - 1) / torch.log2(approxrank + 1)
+        return dcg
+
+    batch_size, n_candidates = scores.shape
+    # compute approxdcg
+    dcg = [get_approxdcg(scores[i], rels[i], k, temperature) for i in range(batch_size)]
+    dcg = torch.stack(dcg, dim=0)
+    # compute idcg
+    idcg = [get_dcg(rels[i], rels[i], k) for i in range(batch_size)]
+    idcg = torch.stack(idcg, dim=0)
+    # compute ndcg
+    ndcg = dcg / idcg
+    return 1 - ndcg.mean()
+

@@ -23,6 +23,7 @@ from src.common.utils import (
 )
 from src.dualfid.trainer import (
     compute_metrics_for_crosscompare,
+    compute_metrics_for_scr
 )
 from src.dualfid.model_util import (
     build_reranker,
@@ -247,7 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
-      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE"
+      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG"
     ], default="BCE")
 
     # data config
@@ -356,8 +357,10 @@ if __name__ == "__main__":
         Dataset = CurriculumDataset
         compute_metrics = compute_metrics_for_curriculum
         args.num_train_epochs *= args.num_curriculum # multiply epochs
-    else:
+    elif args.reranker_type == "crosscompare":
         compute_metrics = compute_metrics_for_crosscompare
+    else:
+        compute_metrics = compute_metrics_for_scr
 
 
     # set up logging
