@@ -2,7 +2,7 @@ from numpy import product
 import torch
 import os
 import os
-import torch
+import numpy as np
 import itertools
 
 from pathlib import Path
@@ -53,7 +53,8 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False):
     file_path = dataset_folder / f'{set_name}.jsonl'
     if shuffle:
         print("Shuffling the dataset...")
-        indices = torch.randperm(len(sources))
+        indices = np.arange(len(sources))
+        np.random.shuffle(indices)
         sources = [sources[i] for i in indices]
         targets = [targets[i] for i in indices]
     ds = CustomDataset.from_raw(sources, targets)

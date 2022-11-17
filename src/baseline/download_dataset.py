@@ -17,9 +17,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pathlib import Path
 from typing import List, Tuple, Union
-from common.data import (
-    save_raw_dataset,
-)
+from common.data import save_raw_dataset
+from common.utils import seed_everything
 
 parser = argparse.ArgumentParser()
 
@@ -113,11 +112,6 @@ def main(args):
                 targets = [x[args.target_key] for x in dataset_set][:args.max_size]
             sources = process_sources(sources)
             save_raw_dataset(args.dataset, set_name, sources, targets, args.shuffle)
-
-def seed_everything(seed=42):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
 
 def process_sources(sources:List[Union[str, List[str]]]):
     """

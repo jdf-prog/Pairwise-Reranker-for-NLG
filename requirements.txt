@@ -11,3 +11,6 @@ pytorch-metric-learning
 prettytable
 fairscale
 pycocoevalcap
+datasets
+evaluate
+sacrebleu
