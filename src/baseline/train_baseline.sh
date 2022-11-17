@@ -52,5 +52,3 @@ train_baseline.py \
     --model_type t5 \
     --model t5-large \
     --model_name t5_common_gen_2_half \
-    --evaluate_before_training True \
-    --max_eval_data_size 100 \

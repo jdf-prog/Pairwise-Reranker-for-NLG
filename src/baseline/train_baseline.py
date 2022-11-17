@@ -63,6 +63,7 @@ def main(args):
         remove_unused_columns=False,
         disable_tqdm=False,
         greater_is_better=True,
+        load_best_model_at_end=True,
     )
     tokenizer = build_tokenizer(args)
     model = build_model(args)
@@ -244,7 +245,7 @@ if __name__ == '__main__':
         "steps", "epoch", "no"
     ], default="epoch")
     parser.add_argument("--save_steps", type=int, default=0)
-    parser.add_argument("--save_total_limit", type=int, default=10)
+    parser.add_argument("--save_total_limit", type=int, default=4)
     parser.add_argument("--metrics", type=str, default=None)
     parser.add_argument("--metric_for_best_model", type=str, default=None,
         choices=['rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bleu', 'cider']
