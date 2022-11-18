@@ -38,7 +38,7 @@ def load_raw_dataset(dataset_name, set_name, partition=None):
     return sources, targets
 
 
-def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False):
+def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, max_size=None):
     """
         Save the raw dataset to pkl files.
         Note that the data path is hard-coded here!
@@ -57,8 +57,12 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False):
         np.random.shuffle(indices)
         sources = [sources[i] for i in indices]
         targets = [targets[i] for i in indices]
+    if isinstance(max_size, int) and max_size > 0:
+        sources = sources[:max_size]
+        targets = targets[:max_size]
     ds = CustomDataset.from_raw(sources, targets)
     ds.to_jsonl(file_path)
+
 
 def load_pkl_candidates(dataset_name, set_name, generation_method, model_name):
     """

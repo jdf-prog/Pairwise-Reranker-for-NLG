@@ -105,13 +105,14 @@ def main(args):
             dataset_set = dataset[set]
             if 'wmt' in args.dataset:
                 slang, tlang = args.data_version.split('-')
-                sources = [d[slang] for d in dataset_set['translation']][:args.max_size]
-                targets = [d[tlang] for d in dataset_set['translation']][:args.max_size]
+                sources = [d[slang] for d in dataset_set['translation']]
+                targets = [d[tlang] for d in dataset_set['translation']]
             else:
-                sources = [x[args.source_key] for x in dataset_set][:args.max_size]
-                targets = [x[args.target_key] for x in dataset_set][:args.max_size]
-            sources = process_sources(sources)
-            save_raw_dataset(args.dataset, set_name, sources, targets, args.shuffle)
+                sources = [x[args.source_key] for x in dataset_set]
+                targets = [x[args.target_key] for x in dataset_set]
+            if 'commongen' in args.dataset:
+                sources = process_sources(sources)
+            save_raw_dataset(args.dataset, set_name, sources, targets, args.shuffle, args.max_size)
 
 def process_sources(sources:List[Union[str, List[str]]]):
     """

@@ -180,7 +180,7 @@ if __name__ == '__main__':
             "bart_cnndm_1_half", "bart_cnndm_2_half",
             "pegasus_xsum_1_half", "pegasus_xsum_2_half",
             "bart_xsum_1_half", "bart_xsum_2_half",
-            "mt5_wmt18_1_half", "mt5_wmt18_2_half",
+            "t5_wmt18_1_half", "t5_wmt18_2_half",
             "t5_common_gen_1_half", "t5_common_gen_2_half"
     ])
     parser.add_argument('--dataset', type=str, default = "cnndm",
@@ -270,12 +270,12 @@ if __name__ == '__main__':
     target_max_lengths = [128, 64, 128, 350, 30]
     lr = [5e-5, 5e-5, 1e-4, 5e-5, 5e-5]
     prefix = [None, None, None, "Translate Chinese to English: ", "Generate a sentence with the following words: "]
-    per_device_train_batch_size = [4, 4, 4, 4, 8]
-    per_device_eval_batch_size = [32, 32, 32, 32, 128]
-    gradient_accumulation_steps = [64, 64, 64, 64, 32]
-    num_train_epochs = [10, 10, 15, 10, 10]
+    per_device_train_batch_size = [8, 8, 4, 8, 8]
+    per_device_eval_batch_size = [64, 64, 32, 64, 128]
+    gradient_accumulation_steps = [32, 32, 64, 32, 32]
+    num_train_epochs = [10, 10, 15, 5, 10]
     generation_num_beams = [5, 5, 5, 5, 5]
-    max_train_data_size = [-1, -1, -1, 100000, -1]
+    max_train_data_size = [-1, -1, -1, 150000, -1]
     max_eval_data_size = [-1, -1, -1, -1, -1]
     max_predict_data_size = [-1, -1, -1, -1, -1]
     metrics = ["rouge1+rouge2+rougeLsum", "rouge1+rouge2+rougeLsum", "rouge1+rouge2+rougeLsum", "bleu", "cider+bleu"]
