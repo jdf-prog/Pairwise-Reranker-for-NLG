@@ -84,6 +84,9 @@ parser.add_argument('--top_p', type = float, default = 0.95) # for top-p samplin
 parser.add_argument('--top_k', type = int, default = 50) # for top-k sampling
 parser.add_argument('--stemmer', type = str2bool, default = True)
 
+parser.add_argument('--start_idx', type = int, default = None)
+parser.add_argument('--end_idx', type = int, default = None)
+
 args = parser.parse_args()
 
 dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
@@ -145,6 +148,11 @@ def main(args):
     # datasets
     sources, targets = data
 
+    if args.start_idx is not None and args.end_idx is not None:
+        print("Using start_idx: {}, end_idx: {}".format(args.start_idx, args.end_idx))
+        sources = sources[args.start_idx:args.end_idx]
+        targets = targets[args.start_idx:args.end_idx]
+
     print(len(sources), len(targets))
     sources = sources[:args.max_val_size]
     targets = targets[:args.max_val_size]
@@ -152,6 +160,7 @@ def main(args):
     if args.debug:
         sources = sources[:args.debug_size]
         targets = targets[:args.debug_size]
+
 
     dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length)
     print("Total size of dataset: {}".format(len(sources)))
@@ -173,8 +182,8 @@ def main(args):
     sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
     # export
     if args.save_candidates:
-        save_pkl_sources_and_targets(args.dataset, args.set, sources, targets)
-        save_pkl_candidates(args.dataset, args.set, args.generation_method, args.model_name, candidates)
+        save_pkl_sources_and_targets(args.dataset, args.set, sources, targets, start_idx=args.start_idx, end_idx=args.end_idx)
+        save_pkl_candidates(args.dataset, args.set, args.generation_method, args.model_name, candidates, start_idx=args.start_idx, end_idx=args.end_idx)
 
 class GenerationDataset(torch.utils.data.Dataset):
     """

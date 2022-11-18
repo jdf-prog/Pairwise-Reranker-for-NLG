@@ -4,6 +4,7 @@ import os
 import os
 import numpy as np
 import itertools
+import regex as re
 
 from pathlib import Path
 from common.dataset import CustomDataset
@@ -64,7 +65,7 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, ma
     ds.to_jsonl(file_path)
 
 
-def load_pkl_candidates(dataset_name, set_name, generation_method, model_name):
+def load_pkl_candidates(dataset_name, set_name, generation_method, model_name, start_idx=None, end_idx=None):
     """
         Load the candidates from pkl files.
         Note that the data path is hard-coded here!
@@ -74,10 +75,11 @@ def load_pkl_candidates(dataset_name, set_name, generation_method, model_name):
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
     postfix = f"_{model_name}"
-    candidates = torch.load(pkl_path / f"candidates{postfix}.pkl")
+    shard_postfix = f".{start_idx}_{end_idx}" if start_idx is not None and end_idx is not None else ""
+    candidates = torch.load(pkl_path / f"candidates{postfix}.pkl{shard_postfix}")
     return candidates
 
-def save_pkl_candidates(dataset_name, set_name, generation_method, model_name, candidates):
+def save_pkl_candidates(dataset_name, set_name, generation_method, model_name, candidates, start_idx=None, end_idx=None):
     """
         Save the candidates to pkl files.
         Note that the data path is hard-coded here!
@@ -88,7 +90,8 @@ def save_pkl_candidates(dataset_name, set_name, generation_method, model_name, c
     pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
     postfix = f"_{model_name}"
     pkl_path.mkdir(parents=True, exist_ok=True)
-    torch.save(candidates, pkl_path / f"candidates{postfix}.pkl")
+    shard_postfix = f".{start_idx}_{end_idx}" if start_idx is not None and end_idx is not None else ""
+    torch.save(candidates, pkl_path / f"candidates{postfix}.pkl{shard_postfix}")
 
 def load_pkl_cand_scores(dataset_name, set_name, generation_method, model_name, metric_name):
     """
@@ -114,7 +117,7 @@ def save_pkl_cand_scores(dataset_name, set_name, generation_method, model_name, 
     pkl_path.mkdir(parents=True, exist_ok=True)
     torch.save(scores, pkl_path / f"cand_scores_{model_name}_{metric_name}.pkl")
 
-def load_pkl_sources_and_targets(dataset_name, set_name):
+def load_pkl_sources_and_targets(dataset_name, set_name, start_idx=None, end_idx=None):
     """
         Load the data from pkl files.
         Note that the data path is hard-coded here!
@@ -124,12 +127,13 @@ def load_pkl_sources_and_targets(dataset_name, set_name):
     """
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     set_path = cur_folder.parent.parent / 'data' / dataset_name / set_name
-    sources = torch.load(set_path / f"sources.pkl")
-    targets = torch.load(set_path / f"targets.pkl")
+    shard_postfix = f".{start_idx}_{end_idx}" if start_idx is not None and end_idx is not None else ""
+    sources = torch.load(set_path / f"sources.pkl{shard_postfix}")
+    targets = torch.load(set_path / f"targets.pkl{shard_postfix}")
     assert len(sources) == len(targets)
     return sources, targets
 
-def save_pkl_sources_and_targets(dataset_name, set_name, sources, targets):
+def save_pkl_sources_and_targets(dataset_name, set_name, sources, targets, start_idx=None, end_idx=None):
     """
         Save the sources and targets to pkl files.
         Note that the data path is hard-coded here!
@@ -140,8 +144,9 @@ def save_pkl_sources_and_targets(dataset_name, set_name, sources, targets):
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     set_path = cur_folder.parent.parent / 'data' / dataset_name / set_name
     set_path.mkdir(parents=True, exist_ok=True)
-    torch.save(sources, set_path / f"sources.pkl")
-    torch.save(targets, set_path / f"targets.pkl")
+    shard_postfix = f".{start_idx}_{end_idx}" if start_idx is not None and end_idx is not None else ""
+    torch.save(sources, set_path / f"sources.pkl{shard_postfix}")
+    torch.save(targets, set_path / f"targets.pkl{shard_postfix}")
     assert len(sources) == len(targets)
     print("Saved the data to pkl files!")
 
@@ -204,6 +209,25 @@ def get_candidate_types(dataset_name, set_name):
                 continue
             model = file.stem[len('candidates_'):]
             candidate_types.append((model, generation_method.name))
+    return candidate_types
+
+def get_parallel_candidate_types(dataset_name, set_name):
+    """
+        Get the tuples of (model, generation_method)
+        for each generation and return
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name
+    candidate_types = []
+    for generation_method in pkl_path.iterdir():
+        if not generation_method.is_dir():
+            continue
+        for file in generation_method.iterdir():
+            if re.match(r'candidates_[a-zA-Z_]+.pkl.\d+_\d+', file.name):
+                print(f"Found parallel candidates: {file.name}")
+                model = file.name.split('.')[0][len('candidates_'):]
+                start_idx, end_idx = file.name.split('.')[-1].split('_')
+                candidate_types.append((model, generation_method.name, int(start_idx), int(end_idx)))
     return candidate_types
 
 def get_candidate_metrics(dataset_name, set_name, model_name, generation_method):

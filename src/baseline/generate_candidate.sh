@@ -2,8 +2,7 @@
 #SBATCH --time=16:00:00
 #SBATCH --job-name=generate_candidates
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --nodelist=ink-molly
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2080:1
 #SBATCH -n 1
 
 # python generate_candidate.py \
@@ -104,41 +103,19 @@
 #     done
 # done
 
-# # wmt18
-# for set in "val" "test"
-# do
-#     for method in "beam_search" "diverse_beam_search"
-#     do
-#         python generate_candidate.py \
-#         --dataset wmt18 \
-#         --model_type nllb \
-#         --model facebook/nllb-200-distilled-1.3B \
-#         --model_name nllb-1.3B \
-#         --load_model False \
-#         --set ${set} \
-#         --inference_bs 1 \
-#         --save_candidates True \
-#         --generation_method ${method} \
-#         --num_return_sequences 15 \
-#         --num_beams 15 \
-#         --num_beam_groups 15
-
-#     done
-# done
-
-# wmt17
-for set in "test"
+# wmt18
+for set in "train"
 do
     for method in "beam_search" "diverse_beam_search"
     do
         python generate_candidate.py \
-        --dataset wmt17 \
+        --dataset wmt18 \
         --model_type opus-mt \
         --model Helsinki-NLP/opus-mt-zh-en \
         --model_name opus_mt \
         --load_model False \
         --set ${set} \
-        --inference_bs 1 \
+        --inference_bs 15 \
         --save_candidates True \
         --generation_method ${method} \
         --num_return_sequences 15 \
