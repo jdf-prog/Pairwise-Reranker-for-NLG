@@ -105,9 +105,9 @@ def main(args):
             metrics = trainer.evaluate()
             logging.info(metrics)
         logging.info('Start training...')
-        outputs = trainer.train()
+        outputs = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
         logging.info(outputs)
-        best_checkpoint = os.join(args.output_dir, 'checkpoint-best')
+        best_checkpoint = os.path.join(args.output_dir, 'checkpoint-best')
         trainer.save_model(best_checkpoint)
         logging.info(f"Best checkpoint saved to {best_checkpoint}")
 
@@ -250,6 +250,7 @@ if __name__ == '__main__':
     parser.add_argument("--metric_for_best_model", type=str, default=None,
         choices=['rouge1', 'rouge2', 'rougeL', 'rougeLsum', 'bleu', 'cider']
     )
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None)
 
     # generation config
     parser.add_argument("--predict_with_generate", type=str2bool, default=True)

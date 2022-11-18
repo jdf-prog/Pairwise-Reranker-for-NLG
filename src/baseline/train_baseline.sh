@@ -51,4 +51,5 @@ train_baseline.py \
     --dataset commongen \
     --model_type t5 \
     --model t5-large \
-    --model_name t5_common_gen_2_half \
+    --model_name t5_common_gen_1_half \
+    --resume_from_checkpoint ../../models/t5_common_gen_1_half/checkpoint-1310 \
