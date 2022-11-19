@@ -70,7 +70,7 @@ parser.add_argument('--load_model_path', type = str, default = None)
 # summary generation
 parser.add_argument('--set', type=str, default = "val",
                     choices = ["train", "first_half_train_shuffled", "second_half_train_shuffled", "val", "test"])
-parser.add_argument('--max_val_size', type = int, default = 50000)
+parser.add_argument('--max_val_size', type = int, default = 100000)
 parser.add_argument('--inference_bs', type = int, default = 2)
 parser.add_argument('--save_candidates', type = str2bool, default = True)
 parser.add_argument('--generation_method', type = str, default = "diverse_beam_search",
@@ -137,22 +137,6 @@ def main(args):
     args.device = device
     print("\nUsing device {}".format(device))
 
-    # data
-    data = load_raw_dataset(args.dataset, args.set)
-    if args.partition == '1_half':
-        start_idx = 0
-        end_idx = int(len(data) / 2)
-    elif args.partition == '2_half':
-        start_idx = int(len(data) / 2)
-        end_idx = len(data)
-    elif args.partition == 'full':
-        start_idx = 0
-        end_idx = len(data)
-    else:
-        start_idx = args.start_idx
-        end_idx = args.end_idx
-
-
     # tokenizer
     tokenizer = build_tokenizer(args)
     if "nllb" in args.model:
@@ -160,21 +144,38 @@ def main(args):
     else:
         forced_bos_token_id = None
 
+    # data
+    data = load_raw_dataset(args.dataset, args.set)
     # datasets
     sources, targets = data
+    data_size = len(sources)
+    if args.partition == '1_half':
+        args.start_idx = 0
+        args.end_idx = data_size // 2
+    elif args.partition == '2_half':
+        args.start_idx = data_size // 2
+        args.end_idx = len(data)
+    elif args.partition == 'full':
+        args.start_idx = 0
+        args.end_idx = len(data)
+    elif args.partition is None:
+        pass
 
     if args.start_idx is not None and args.end_idx is not None:
         print("Using start_idx: {}, end_idx: {}".format(args.start_idx, args.end_idx))
         sources = sources[args.start_idx:args.end_idx]
         targets = targets[args.start_idx:args.end_idx]
+        print("Current data size: {}".format(len(sources)))
 
-    print(len(sources), len(targets))
+    print("Cutting data to {} below samples".format(args.max_val_size))
     sources = sources[:args.max_val_size]
     targets = targets[:args.max_val_size]
-    print(len(sources), len(targets))
+    print("Current data size: {}".format(len(sources)))
     if args.debug:
+        print(f"Debug mode: cutting data to {args.debug_size} samples")
         sources = sources[:args.debug_size]
         targets = targets[:args.debug_size]
+        print("Current data size: {}".format(len(sources)))
 
 
     dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length, args.prefix)

@@ -64,7 +64,7 @@ def main(args):
 
     ds = load_prepared_dataset(args.dataset, args.set)
     ds.analyze_oracle()
-    save_prepared_dataset(args.dataset, args.set, ds)
+    # save_prepared_dataset(args.dataset, args.set, ds)
 
 
 
