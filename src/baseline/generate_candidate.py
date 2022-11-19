@@ -52,21 +52,20 @@ parser.add_argument('--model', type = str, default = "google/pegasus-large",
                     "facebook/bart-large", "facebook/bart-large-cnn", "facebook/bart-large-xsum",
                     "Helsinki-NLP/opus-mt-zh-en", "Helsinki-NLP/opus-mt-de-en", "Helsinki-NLP/opus-mt-it-en",
                     "facebook/nllb-200-3.3B", "facebook/nllb-200-1.3B", "facebook/nllb-200-distilled-1.3B", "facebook/nllb-200-distilled-600M",
-                    "facebook/m2m100_1.2B", "facebook/m2m100_418M",
+                    "facebook/m2m100_1.2B", "facebook/m2m100_418M", "t5-large", "t5-base",
                     "mrm8488/t5-base-finetuned-common_gen", "google/flan-t5-large", "sibyl/BART-large-commongen"])
 parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1",
-                    choices = ["pegasus_unsupervised", "bart_unsupervised",
-                    "pegasus_cnndm_first_half_shuffled_1", "pegasus_cnndm_second_half_shuffled_1", "pegasus_cnndm",
-                    "bart_cnndm_first_half_shuffled_1", "bart_cnndm_second_half_shuffled_1", "bart_cnndm",
-                    "pegasus_xsum_first_half_shuffled_1", "pegasus_xsum_second_half_shuffled_1", "pegasus_xsum",
-                    "bart_xsum_first_half_shuffled_1", "bart_xsum_second_half_shuffled_1", "bart_xsum",
-                    "pegasus_reddit_first_half_shuffled_1", "pegasus_reddit_second_half_shuffled_1", "pegasus_reddit_train_1",
-                    "bart_reddit_first_half_shuffled_1", "bart_reddit_second_half_shuffled_1", "bart_reddit_train_1",
-                    "opus_mt", "nllb-3.3B", "nllb-1.3B", "nllb-600M", "m2m100",
-                    'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen'])
+                    choices = [
+                        "pegasus_cnndm", "pegasus_cnndm_1_half", "pegasus_cnndm_2_half", "pegasus_cnndm_half",
+                        "bart_cnndm", "bart_cnndm_1_half", "bart_cnndm_2_half", "bart_cnndm_half",
+                        "pegasus_xsum", "pegasus_xsum_1_half", "pegasus_xsum_2_half", "pegasus_xsum_half",
+                        "bart_xsum", "bart_xsum_1_half", "bart_xsum_2_half", "bart_xsum_half",
+                        "t5_wmt18_1_half", "t5_wmt18_2_half", "t5_wmt18_half",
+                        "t5_common_gen", "t5_common_gen_1_half", "t5_common_gen_half",
+                        "opus_mt", "nllb-3.3B", "nllb-1.3B", "nllb-600M", "m2m100",
+                        'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen'])
 parser.add_argument('--load_model', type = str2bool, default = False)
-parser.add_argument('--load_model_path', type = str,
-                    default = "../base_model_finetuning/ft_saved_models/reddit/pegasus_reddit_train_1/checkpoint-5/pytorch_model.bin") # todo: change to where you saved the finetuned checkpoint
+parser.add_argument('--load_model_path', type = str, default = None)
 
 # summary generation
 parser.add_argument('--set', type=str, default = "val",
@@ -86,7 +85,8 @@ parser.add_argument('--stemmer', type = str2bool, default = True)
 
 parser.add_argument('--start_idx', type = int, default = None)
 parser.add_argument('--end_idx', type = int, default = None)
-
+parser.add_argument('--partition', type = str, default = None,
+    choices = ['1_half', '2_half', 'full', None])
 args = parser.parse_args()
 
 dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
@@ -99,6 +99,7 @@ length_penalties_pegasus = [0.8, 0.8, 0.6, 0.8, 0.8]
 length_penalties_bart = [0.8, 0.8, 1.0, 0.8, 0.8]
 repetition_penalties = [1.0, 1.0, 1.0, 1.0, 1.0]
 no_repeat_ngram_sizes = [0, 3, 3, 0, 0]
+prefix = [None, None, None, "Translate Chinese to English: ", "Generate a sentence with the following words: "]
 
 idx = dataset_names.index(args.dataset)
 
@@ -115,6 +116,7 @@ else:
 args.repetition_penalty = repetition_penalties[idx]
 args.no_repeat_ngram_size = no_repeat_ngram_sizes[idx]
 args.cache_dir = "../../hf_models/" + args.model.split('/')[-1] + "/"
+args.prefix = prefix[idx]
 
 print("*"*50)
 print(args)
@@ -137,6 +139,19 @@ def main(args):
 
     # data
     data = load_raw_dataset(args.dataset, args.set)
+    if args.partition == '1_half':
+        start_idx = 0
+        end_idx = int(len(data) / 2)
+    elif args.partition == '2_half':
+        start_idx = int(len(data) / 2)
+        end_idx = len(data)
+    elif args.partition == 'full':
+        start_idx = 0
+        end_idx = len(data)
+    else:
+        start_idx = args.start_idx
+        end_idx = args.end_idx
+
 
     # tokenizer
     tokenizer = build_tokenizer(args)
@@ -162,7 +177,7 @@ def main(args):
         targets = targets[:args.debug_size]
 
 
-    dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length)
+    dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length, args.prefix)
     print("Total size of dataset: {}".format(len(sources)))
 
     # data loader
@@ -170,13 +185,14 @@ def main(args):
 
     # model
     model = build_model(args)
+    if args.load_model:
+        state_dict = torch.load(os.path.join(args.load_model_path, "pytorch_model.bin"))
+        load_result = model.load_state_dict(state_dict)
+        print("Loaded the model weights!", args.load_model_path)
     model = FTModel(model, args)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("\nThe model has {} trainable parameters".format(n_params))
     model = model.to(device)
-    if args.load_model:
-        model.load_state_dict(torch.load(args.load_model_path))
-        print("Loaded the model weights!", args.load_model_path)
 
     # summary generation
     sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
@@ -190,18 +206,19 @@ class GenerationDataset(torch.utils.data.Dataset):
         Dataset for generate candidates for given sources
     """
 
-    def __init__(self, tokenizer, sources, targets, source_max_length, target_max_length):
+    def __init__(self, tokenizer, sources, targets, source_max_length, target_max_length, prefix=None):
         self.tokenizer = tokenizer
         self.sources = sources
         self.targets = targets
         self.source_max_length = source_max_length
         self.target_max_length = target_max_length
+        self.prefix = prefix if prefix is not None else ""
 
     def __len__(self):
         return len(self.sources)
 
     def __getitem__(self, item):
-        source = self.sources[item]
+        source = self.prefix + self.sources[item]
         target = self.targets[item]
 
         source_inputs = self.tokenizer(source, return_tensors="pt", max_length=self.source_max_length, padding='max_length')

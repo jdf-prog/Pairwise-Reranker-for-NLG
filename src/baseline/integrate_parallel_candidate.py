@@ -53,9 +53,9 @@ if __name__ == "__main__":
             integrated_candidates = []
             integrated_sources = []
             integrated_targets = []
-            shard_idxs = shard_idxs[model][generation_method]["shard_idxs"]
-            start_idxs = sorted(list(shard_idxs.keys()))
-            end_idxs = [shard_idxs[start_idx] for start_idx in start_idxs]
+            idxs = shard_idxs[model][generation_method]["shard_idxs"]
+            start_idxs = sorted(list(idxs.keys()))
+            end_idxs = [idxs[start_idx] for start_idx in start_idxs]
             assert start_idxs[1:] == end_idxs[:-1], "start_idxs and end_idxs are not aligned"
 
             print(f"start_idxs: {start_idxs}")
@@ -72,9 +72,9 @@ if __name__ == "__main__":
             assert len(integrated_targets) == end_idx, f"len(integrated_targets) {len(integrated_targets)} is not equal to end_idx {end_idx}"
             print("length of integrated: ", len(integrated_candidates))
             print("Saving integrated sources, targets and candidates")
-            # save_pkl_candidates(args.dataset, args.set, generation_method, model, integrated_candidates)
+            save_pkl_candidates(args.dataset, args.set, generation_method, model, integrated_candidates)
             print(f"Saved {generation_method} {model} {args.set} candidates")
-            # save_pkl_sources_and_targets(args.dataset, args.set, integrated_sources, integrated_targets)
+            save_pkl_sources_and_targets(args.dataset, args.set, integrated_sources, integrated_targets)
             print(f"Saved {generation_method} {model} {args.set} sources and targets")
 
 
