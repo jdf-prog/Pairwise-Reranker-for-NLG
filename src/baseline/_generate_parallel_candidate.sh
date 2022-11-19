@@ -2,7 +2,7 @@
 #SBATCH --time=10:00:00
 #SBATCH --job-name=generate_parallel_candidates
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:1
 #SBATCH -n 1
 
 
@@ -13,11 +13,12 @@ model_name=$4
 load_model=$5
 load_model_path=$6
 set=$7
-inference_bs=$8
-generation_method=$9
-num_shards=${10}
-shard_size=${11}
-shard_id=${12}
+partition=$8
+inference_bs=$9
+generation_method=${10}
+num_shards=${11}
+shard_size=${12}
+shard_id=${13}
 
 echo "dataset: $dataset"
 echo "model_type: $model_type"
@@ -26,6 +27,7 @@ echo "model_name: $model_name"
 echo "load_model: $load_model"
 echo "load_model_path: $load_model_path"
 echo "set: $set"
+echo "partition: $partition"
 echo "inference_bs: $inference_bs"
 echo "generation_method: $generation_method"
 echo "num_shards: $num_shards"
@@ -45,11 +47,12 @@ python generate_candidate.py \
 --load_model "$load_model" \
 --load_model_path "$load_model_path" \
 --set "${set}" \
+--partition "${partition}" \
 --inference_bs "$inference_bs" \
---save_candidates True \
 --generation_method "$generation_method" \
 --start_idx "$start_idx" \
 --end_idx "$end_idx" \
+--save_candidates True \
 --num_return_sequences 15 \
 --num_beams 15 \
 --num_beam_groups 15

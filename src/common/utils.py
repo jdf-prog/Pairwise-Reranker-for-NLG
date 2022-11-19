@@ -21,3 +21,11 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+def empty2None(x):
+    if x == '':
+        return None
+    elif isinstance(x, str):
+        return x
+    else:
+        raise argparse.ArgumentTypeError('String value expected.')

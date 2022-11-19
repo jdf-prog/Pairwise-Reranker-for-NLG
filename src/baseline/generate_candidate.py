@@ -22,7 +22,8 @@ from model_utils import (
 )
 from common.utils import (
     seed_everything,
-    str2bool
+    str2bool,
+    empty2None,
 )
 from common.data import (
     load_raw_dataset,
@@ -85,7 +86,7 @@ parser.add_argument('--stemmer', type = str2bool, default = True)
 
 parser.add_argument('--start_idx', type = int, default = None)
 parser.add_argument('--end_idx', type = int, default = None)
-parser.add_argument('--partition', type = str, default = None,
+parser.add_argument('--partition', type = empty2None, default = None,
     choices = ['1_half', '2_half', 'full', None])
 args = parser.parse_args()
 
@@ -122,7 +123,6 @@ print("*"*50)
 print(args)
 
 
-
 def main(args):
     # seed
     seed_everything(args.seed)
@@ -145,21 +145,9 @@ def main(args):
         forced_bos_token_id = None
 
     # data
-    data = load_raw_dataset(args.dataset, args.set)
+    data = load_raw_dataset(args.dataset, args.set, partition=args.partition)
     # datasets
     sources, targets = data
-    data_size = len(sources)
-    if args.partition == '1_half':
-        args.start_idx = 0
-        args.end_idx = data_size // 2
-    elif args.partition == '2_half':
-        args.start_idx = data_size // 2
-        args.end_idx = len(data)
-    elif args.partition == 'full':
-        args.start_idx = 0
-        args.end_idx = len(data)
-    elif args.partition is None:
-        pass
 
     if args.start_idx is not None and args.end_idx is not None:
         print("Using start_idx: {}, end_idx: {}".format(args.start_idx, args.end_idx))
@@ -176,6 +164,10 @@ def main(args):
         sources = sources[:args.debug_size]
         targets = targets[:args.debug_size]
         print("Current data size: {}".format(len(sources)))
+
+    if len(sources) == 0:
+        print("No data to evaluate")
+        return
 
 
     dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length, args.prefix)
@@ -241,5 +233,4 @@ class GenerationDataset(torch.utils.data.Dataset):
 
 
 if __name__ == '__main__':
-
     main(args)

@@ -23,6 +23,8 @@ def load_raw_dataset(dataset_name, set_name, partition=None):
     """
     assert set_name in ['train', 'val', 'test']
     assert partition is None or partition in ['1_half', '2_half', 'full']
+    print(f"Loading {set_name} set from {dataset_name} dataset...")
+    print(f"Using partition {partition}...")
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
     file_path = dataset_folder / f'{set_name}.jsonl'
