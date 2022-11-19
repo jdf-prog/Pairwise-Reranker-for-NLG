@@ -43,23 +43,3 @@ do
         "$shard_size" \
         "$shard_id"
 done
-
-
-
-for shard_id in $(seq 0 $((num_shards - 1)))
-do
-    sbatch _generate_parallel_candidate.sh \
-        "$dataset" \
-        "$model_type" \
-        "$model" \
-        "$model_name" \
-        "$load_model" \
-        "$load_model_path" \
-        "$set" \
-        "$partition" \
-        "$inference_bs" \
-        "$generation_method" \
-        "$num_shards" \
-        "$shard_size" \
-        "$shard_id"
-done
