@@ -25,6 +25,34 @@ from model_utils import (
 
 def main(args):
     seed_everything(args.seed)
+
+    tokenizer = build_tokenizer(args)
+    model = build_model(args)
+
+    if args.do_train:
+        if '1_half' in args.model_name:
+            sources, targets = load_raw_dataset(args.dataset, 'train', '1_half')
+        elif '2_half' in args.model_name:
+            sources, targets = load_raw_dataset(args.dataset, 'train', '2_half')
+        else:
+            sources, targets = load_raw_dataset(args.dataset, 'train', 'full')
+        train_dataset = Dataset(tokenizer, sources, targets, args.source_max_length, args.target_max_length, args.prefix, max_size=args.max_train_data_size)
+    else:
+        train_dataset = None
+    if args.do_eval:
+        args.eval_strategy = 'no'
+        sources, targets = load_raw_dataset(args.dataset, 'val', 'full')
+        eval_dataset = Dataset(tokenizer, sources, targets, args.source_max_length, args.target_max_length, args.prefix, max_size=args.max_eval_data_size)
+    else:
+        eval_dataset = None
+        args.eval_strategy = 'no'
+        args.save_strategy = 'no'
+    if args.do_predict:
+        sources, targets = load_raw_dataset(args.dataset, 'test', 'full')
+        predict_dataset = Dataset(tokenizer, sources, targets, args.source_max_length, args.target_max_length, args.prefix, max_size=args.max_predict_data_size)
+    else:
+        predict_dataset = None
+
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
         overwrite_output_dir=args.overwrite_output_dir,
@@ -65,29 +93,6 @@ def main(args):
         greater_is_better=True,
         load_best_model_at_end=True,
     )
-    tokenizer = build_tokenizer(args)
-    model = build_model(args)
-
-    if args.do_train:
-        if '1_half' in args.model_name:
-            sources, targets = load_raw_dataset(args.dataset, 'train', '1_half')
-        elif '2_half' in args.model_name:
-            sources, targets = load_raw_dataset(args.dataset, 'train', '2_half')
-        else:
-            sources, targets = load_raw_dataset(args.dataset, 'train', 'full')
-        train_dataset = Dataset(tokenizer, sources, targets, args.source_max_length, args.target_max_length, args.prefix, max_size=args.max_train_data_size)
-    else:
-        train_dataset = None
-    if args.do_eval:
-        sources, targets = load_raw_dataset(args.dataset, 'val', 'full')
-        eval_dataset = Dataset(tokenizer, sources, targets, args.source_max_length, args.target_max_length, args.prefix, max_size=args.max_eval_data_size)
-    else:
-        eval_dataset = None
-    if args.do_predict:
-        sources, targets = load_raw_dataset(args.dataset, 'test', 'full')
-        predict_dataset = Dataset(tokenizer, sources, targets, args.source_max_length, args.target_max_length, args.prefix, max_size=args.max_predict_data_size)
-    else:
-        predict_dataset = None
 
     trainer = Seq2SeqTrainer(
         model=model,

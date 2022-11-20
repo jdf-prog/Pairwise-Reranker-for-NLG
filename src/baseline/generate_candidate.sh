@@ -127,7 +127,7 @@
 #     --dataset commongen \
 #     --model_type t5 \
 #     --model t5-large \
-#     --model_name t5_common_gen_1_half \
+#     --model_name t5_common_gen_half \
 #     --load_model True \
 #     --load_model_path "../../models/t5_common_gen_1_half/checkpoint-best" \
 #     --partition '2_half' \
@@ -152,7 +152,7 @@ do
     --dataset commongen \
     --model_type t5 \
     --model t5-large \
-    --model_name t5_common_gen_2_half \
+    --model_name t5_common_gen_half \
     --load_model True \
     --load_model_path "../../models/t5_common_gen_2_half/checkpoint-best" \
     --partition '1_half' \

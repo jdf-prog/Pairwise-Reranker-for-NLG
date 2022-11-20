@@ -34,6 +34,7 @@ if __name__ == "__main__":
     seed_everything(args.seed)
 
     parallel_candidate_types = get_parallel_candidate_types(args.dataset, args.set)
+    print("parallel_candidate_types", parallel_candidate_types)
     shard_idxs = {}
     for parallel_candidate_type in parallel_candidate_types:
         model, generation_method, start_idx, end_idx = parallel_candidate_type

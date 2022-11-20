@@ -242,7 +242,7 @@ def get_parallel_candidate_types(dataset_name, set_name):
         if not generation_method.is_dir():
             continue
         for file in generation_method.iterdir():
-            if re.match(r'candidates_[a-zA-Z_]+.pkl.\d+_\d+', file.name):
+            if re.match(r'candidates_[a-zA-Z0-9_]+.pkl.\d+_\d+', file.name):
                 print(f"Found parallel candidates: {file.name}")
                 model = file.name.split('.')[0][len('candidates_'):]
                 start_idx, end_idx = file.name.split('.')[-1].split('_')
@@ -267,3 +267,121 @@ def get_candidate_metrics(dataset_name, set_name, model_name, generation_method)
         metric = file.stem[len(f'cand_scores_{model_name}_'):]
         candidate_metrics.append(metric)
     return candidate_metrics
+
+def _get_all_parallel_idxs(file):
+    """
+        Get the start and end parallel indices
+        i.e. find the files that apply "{file}.{start_idx}_{end_idx}"
+    Args:
+        file: the file name
+    Returns:
+        start_idxs: the start indices
+        end_idxs: the end indices
+        same length
+    """
+    if not isinstance(file, Path):
+        file = Path(file)
+    idxs = {}
+    for f in file.parent.iterdir():
+        if re.match(f'{file.name}.\d+_\d+', f.name):
+            start_idx, end_idx = f.name.split('.')[-1].split('_')
+            idxs[int(start_idx)] = int(end_idx)
+    start_idxs = sorted(list(idxs.keys()))
+    end_idxs = [idxs[start_idx] for start_idx in start_idxs]
+    assert start_idxs[1:] == end_idxs[:-1], f"Start and end indices do not match: {start_idxs} {end_idxs}"
+    return start_idxs, end_idxs
+
+def _get_sub_parallel_idxs(start_idx, end_idx, start_idxs, end_idxs):
+    """
+        get the parallel indices that cover the range [start_idx, end_idx]
+    Args:
+        start_idx: the start index
+        end_idx: the end index
+        start_idxs: the list of start indices
+        end_idxs: the list of end indices
+    Returns:
+        sub_start_idxs: the start indices that cover the range
+        sub_end_idxs: the end indices that cover the range
+    """
+    idxs = dict(zip(start_idxs, end_idxs))
+    start_idxs = sorted(list(idxs.keys()))
+    end_idxs = [idxs[start_idx] for start_idx in start_idxs]
+    left, right = None
+    for i in range(len(start_idxs)-1, -1, -1):
+        if start_idx >= start_idxs[i]:
+            left = i
+    for i in range(len(end_idxs)):
+        if end_idx < end_idxs[i]:
+            right = i
+            break
+    assert left is not None and right is not None, "The start and end indices lie outside the range of the list"
+    sub_start_idxs = start_idxs[left:right+1]
+    sub_end_idxs = end_idxs[left:right+1]
+    # check the continuity
+    assert sub_start_idxs[1:] == sub_end_idxs[:-1], f"Start and end indices are not continuous: {sub_start_idxs} {sub_end_idxs}"
+    return sub_start_idxs, sub_end_idxs
+
+
+def _save_pkl_parallel(file, obj, start_idx, end_idx):
+    """
+        Save the object to a pickle file
+    Args:
+        file: the file name
+        start_idx: the start index
+        end_idx: the end index
+        obj: the object
+    """
+    if not isinstance(file, Path):
+        file = Path(file)
+    torch.save(obj, f'{file}.{start_idx}_{end_idx}')
+
+def _load_pkl_parallel(file, start_idx, end_idx):
+    """
+        Load the parallel contents from the file
+    Args:
+        file: the file name
+        start_idx: the start index
+        end_idx: the end index
+
+    """
+    if not isinstance(file, Path):
+        file = Path(file)
+    start_idxs, end_idxs = _get_all_parallel_idxs(file)
+    sub_start_idxs, sub_end_idxs = _get_sub_parallel_idxs(start_idx, end_idx, start_idxs, end_idxs)
+    contents = []
+    for start_idx, end_idx in zip(sub_start_idxs, sub_end_idxs):
+        shard_postfix = f'.{start_idx}_{end_idx}'
+        shard_file = file.parent / (file.name + shard_postfix)
+        sub_contents = torch.load(shard_file)
+        contents.extend(sub_contents)
+    # clip the contents into the range
+    contents = contents[start_idx-sub_start_idxs[0]:end_idx-sub_start_idxs[0]+1]
+
+def save_pkl(file, obj, start_idx=None, end_idx=None):
+    """
+        Save the object to a pickle file
+    Args:
+        file: the file name
+        obj: the object
+    """
+    if not isinstance(file, Path):
+        file = Path(file)
+    if start_idx is not None and end_idx is not None:
+        _save_pkl_parallel(file, obj, start_idx, end_idx)
+    else:
+        torch.save(obj, file)
+
+def load_pkl(file, start_idx=None, end_idx=None):
+    """
+        Load a pickle file
+    Args:
+        file: the file name
+    Returns:
+        the loaded object
+    """
+    if not isinstance(file, Path):
+        file = Path(file)
+    if start_idx is not None and end_idx is not None:
+        return _load_pkl_parallel(file, start_idx, end_idx)
+    else:
+        return torch.load(file)
