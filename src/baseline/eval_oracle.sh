@@ -24,6 +24,6 @@
 
 python eval_oracle.py \
     --dataset commongen \
-    --set train \
+    --set val \
     --metrics "bleu,cider" \
     --num_workers 1 \

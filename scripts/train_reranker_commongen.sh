@@ -36,17 +36,17 @@ train_reranker.py \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
     --n_candidates 30 \
-    --candidate_model "t5_common_gen" \
+    --candidate_model "t5_common_gen_half+t5_common_gen" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 30 \
     --candidate_maxlength 30 \
-    --per_device_train_batch_size 12 \
+    --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 128 \
-    --gradient_accumulation_steps 4 \
-    --num_train_epochs 4 \
+    --gradient_accumulation_steps 1 \
+    --num_train_epochs 5 \
     --overwrite_output_dir True \
-    --num_pos 4 \
-    --num_neg 4 \
+    --num_pos 1 \
+    --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
     --max_train_data_size -1 \

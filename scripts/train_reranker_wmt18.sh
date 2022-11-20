@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
+#SBATCH --time=36:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
@@ -41,13 +41,13 @@ train_reranker.py \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps 16 \
-    --num_train_epochs 3 \
+    --num_train_epochs 5 \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
-    --max_train_data_size 50000 \
+    --max_train_data_size -1 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --using_metrics "bleu" \

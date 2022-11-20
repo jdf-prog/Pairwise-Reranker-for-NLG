@@ -40,7 +40,7 @@ train_reranker.py \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps 16 \
-    --num_train_epochs 3 \
+    --num_train_epochs 5 \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \

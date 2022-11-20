@@ -77,8 +77,6 @@ def main(args):
         predict_examples = load_data(args.test_data_path, args, mode='predict')
         predict_dataset = Dataset(predict_examples, args.n_candidates)
 
-
-
     if args.do_train:
         if args.do_eval:
             assert train_dataset.n_tasks == eval_dataset.n_tasks
