@@ -15,7 +15,7 @@
 dataset=cnndm
 model_type=pegasus
 model=google/pegasus-large
-model_name="pegasus_cnndm_half"
+model_name="pegasus_cnndm_2_half"
 load_model=True
 load_model_path="../../models/pegasus_cnndm_2_half/checkpoint-best"
 set='train'

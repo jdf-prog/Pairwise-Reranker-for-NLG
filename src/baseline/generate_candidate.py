@@ -29,6 +29,7 @@ from common.data import (
     load_raw_dataset,
     save_pkl_candidates,
     save_pkl_sources_and_targets,
+    exist_pkl_candidates
 )
 from common.dataset import CustomDataset
 from pathlib import Path
@@ -62,7 +63,7 @@ parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1"
                         "pegasus_xsum", "pegasus_xsum_1_half", "pegasus_xsum_2_half", "pegasus_xsum_half",
                         "bart_xsum", "bart_xsum_1_half", "bart_xsum_2_half", "bart_xsum_half",
                         "t5_wmt18_1_half", "t5_wmt18_2_half", "t5_wmt18_half",
-                        "t5_common_gen", "t5_common_gen_1_half", "t5_common_gen_half",
+                        "t5_common_gen_1_half", "t5_common_gen_2_half", "t5_common_gen_half",
                         "opus_mt", "nllb-3.3B", "nllb-1.3B", "nllb-600M", "m2m100",
                         'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen'])
 parser.add_argument('--load_model', type = str2bool, default = False)
@@ -88,6 +89,7 @@ parser.add_argument('--start_idx', type = int, default = None)
 parser.add_argument('--end_idx', type = int, default = None)
 parser.add_argument('--partition', type = empty2None, default = None,
     choices = ['1_half', '2_half', 'full', None])
+parser.add_argument('--overwrite', type = str2bool, default = True)
 args = parser.parse_args()
 
 dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
@@ -145,15 +147,24 @@ def main(args):
         forced_bos_token_id = None
 
     # data
-    data = load_raw_dataset(args.dataset, args.set, partition=args.partition)
-    # datasets
-    sources, targets = data
+    sources, targets, offsets = load_raw_dataset(args.dataset, args.set, partition=args.partition, return_offsets=True)
 
     if args.start_idx is not None and args.end_idx is not None:
         print("Using start_idx: {}, end_idx: {}".format(args.start_idx, args.end_idx))
         sources = sources[args.start_idx:args.end_idx]
         targets = targets[args.start_idx:args.end_idx]
+        if len(sources) < args.end_idx - args.start_idx:
+            print("End index is larger than the dataset size. Using the last index instead.")
+            args.end_idx = len(sources) + args.start_idx
         print("Current data size: {}".format(len(sources)))
+        # add offsets for saving
+        args.start_idx += offsets[0]
+        args.end_idx += offsets[0]
+    else:
+        # add offsets for saving, so that the idx are true with respect to the original whole dataset
+        args.start_idx = offsets[0]
+        args.end_idx = offsets[1]
+    print("Idxs used for saving: {} - {}".format(args.start_idx, args.end_idx))
 
     print("Cutting data to {} below samples".format(args.max_val_size))
     sources = sources[:args.max_val_size]
@@ -169,13 +180,19 @@ def main(args):
         print("No data to evaluate")
         return
 
+    # check if the data have already been generated
+    if exist_pkl_candidates(args.dataset, args.set, args.generation_method, args.model_name, start_idx=args.start_idx, end_idx=args.end_idx):
+        print("Found existing candidates.")
+        if args.overwrite:
+            print("Overwriting existing data")
+        else:
+            print("Not overwriting existing data. Finishing generating")
+            return
 
     dataset = GenerationDataset(tokenizer, sources, targets, args.source_max_length, args.candidate_max_length, args.prefix)
     print("Total size of dataset: {}".format(len(sources)))
-
     # data loader
     dataloader = torch.utils.data.DataLoader(dataset, batch_size = args.inference_bs, shuffle = False)
-
     # model
     model = build_model(args)
     if args.load_model:
@@ -186,9 +203,9 @@ def main(args):
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("\nThe model has {} trainable parameters".format(n_params))
     model = model.to(device)
-
     # summary generation
     sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
+
     # export
     if args.save_candidates:
         save_pkl_sources_and_targets(args.dataset, args.set, sources, targets, start_idx=args.start_idx, end_idx=args.end_idx)

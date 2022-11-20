@@ -11,7 +11,7 @@ from common.dataset import CustomDataset
 
 
 
-def load_raw_dataset(dataset_name, set_name, partition=None):
+def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=False):
     """
         Load from the specified dataset. Note that the data path is hard-coded here!
     Args:
@@ -20,6 +20,7 @@ def load_raw_dataset(dataset_name, set_name, partition=None):
     Returns:
         sources: the list of sources
         targets: the list of targets
+        offsets: the offsets of the cut points
     """
     assert set_name in ['train', 'val', 'test']
     assert partition is None or partition in ['1_half', '2_half', 'full']
@@ -31,14 +32,20 @@ def load_raw_dataset(dataset_name, set_name, partition=None):
     ds = CustomDataset.from_jsonl(file_path)
     sources = [item['source'] for item in ds]
     targets = [item['target'] for item in ds]
+    offsets = (0, len(sources))
     if partition in ['1_half', '2_half']:
         if partition == '1_half':
+            offsets = (0, len(sources)//2)
             sources = sources[:len(sources) // 2]
             targets = targets[:len(targets) // 2]
         else:
+            offsets = (len(sources)//2, len(sources))
             sources = sources[len(sources) // 2:]
             targets = targets[len(targets) // 2:]
-    return sources, targets
+    if return_offsets:
+        return sources, targets, offsets
+    else:
+        return sources, targets
 
 
 def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, max_size=None):
@@ -66,6 +73,16 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, ma
     ds = CustomDataset.from_raw(sources, targets)
     ds.to_jsonl(file_path)
 
+def exist_pkl_candidates(dataset_name, set_name, generation_method, model_name, start_idx=None, end_idx=None):
+    """
+        Check if the candidates pkl file exists.
+        Note that the data path is hard-coded here!
+    """
+    cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
+    pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
+    postfix = f"_{model_name}"
+    shard_postfix = f".{start_idx}_{end_idx}" if start_idx is not None and end_idx is not None else ""
+    return (pkl_path / f"candidates{postfix}.pkl{shard_postfix}").exists()
 
 def load_pkl_candidates(dataset_name, set_name, generation_method, model_name, start_idx=None, end_idx=None):
     """
