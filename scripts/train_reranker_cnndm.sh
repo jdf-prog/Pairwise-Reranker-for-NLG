@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
+#SBATCH --time=60:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
@@ -33,14 +33,14 @@ train_reranker.py \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
     --n_candidates 30 \
-    --candidate_model "pegasus_cnndm" \
+    --candidate_model "pegasus_cnndm+pegasus_cnndm_half" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps 16 \
-    --num_train_epochs 5 \
+    --num_train_epochs 4 \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \
