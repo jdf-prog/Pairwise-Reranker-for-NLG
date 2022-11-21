@@ -222,6 +222,10 @@ def get_ndcg(scores, rels):
         scores: [batch_size, n_candidates], computed by model
         rels: [batch_size, n_candidates], relevance labels
     """
+    if isinstance(scores, np.ndarray):
+        scores = torch.tensor(scores)
+    if isinstance(rels, np.ndarray):
+        rels = torch.tensor(rels)
     batch_size, n_candidates = scores.shape
     # compute dcg
     dcg = [get_dcg(scores[i], rels[i]) for i in range(batch_size)]
