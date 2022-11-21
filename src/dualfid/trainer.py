@@ -11,6 +11,7 @@ from transformers import EvalPrediction
 from typing import Dict, List, Optional, Tuple, Union, Any
 from torch.utils.data import Dataset
 from dualfid.curriculum import CurriculumSampler
+from dualfid.loss import get_ndcg
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def compute_metrics_for_scr(eval_pred: EvalPrediction) -> Dict[str, float]:
     preds, labels = eval_pred # pred_scores [batch_size, num_candidates], scores [batch_size, num_candidates, n_tasks]
     pred_scores = preds
     scores = labels
-    agg_scores = np.sum(scores, axis=-1) # aggregate scores
+    agg_scores = np.mean(scores, axis=-1) # aggregate scores
 
     sort_indices = np.flip(np.argsort(agg_scores, axis=-1), axis=-1) # (batch_size, n_candidates), expected ranks
     ranks = np.zeros_like(sort_indices)
@@ -118,7 +119,8 @@ def compute_metrics_for_scr(eval_pred: EvalPrediction) -> Dict[str, float]:
             "rouge2": np.mean(oracle_sel_scores[:, 1]),
             "rougeL": np.mean(oracle_sel_scores[:, 2]),
         },
-        "dev_score": np.mean(sel_scores[:, 1]), # dev score used for save checkpoint
+        "dev_score": np.mean(sel_scores[:, 1]), # dev score used for save checkpoint,
+        "NDCG": get_ndcg(pred_scores, agg_scores)
     }
     return metrics
 
