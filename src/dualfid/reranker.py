@@ -12,7 +12,6 @@ import torch.nn.functional as F
 import os
 from dualfid.layers import (
     MoE,
-    MIDisentangledLayer
 )
 from dualfid.loss import (
     infoNCE_loss,
@@ -87,7 +86,7 @@ class SCR(nn.Module):
                 nn.Linear(self.hidden_size, 2* self.hidden_size),
                 nn.Tanh(),
                 nn.Dropout(self.drop_out),
-                nn.Linear(2 * self.hidden_size, 1),
+                nn.Linear(2 * self.hidden_size, self.n_tasks),
             )
             # self.regression_layer = nn.Sequential(
             #     nn.Dropout(self.drop_out),
@@ -181,6 +180,13 @@ class SCR(nn.Module):
             loss = triplet_simcls_loss(pred_scores, target_pred_scores, scores)
         elif self.loss_type == "ApproxNDCG":
             loss = ApproxNDCG_loss(pred_scores, scores)
+        elif "ranknet" in self.loss_type.lower():
+            dif_pred_scores = pred_scores.unsqueeze(1) - pred_scores.unsqueeze(2)
+            dif_pred_scores = 1 / (1 + torch.exp(-dif_pred_scores))
+            dif_scores = scores.unsqueeze(1) - scores.unsqueeze(2)
+            dif_labels = torch.where(dif_scores > 0, torch.ones_like(dif_scores), torch.zeros_like(dif_scores))
+            dif_labels = torch.where(dif_scores == 0, torch.ones_like(dif_scores) * 0.5, dif_labels)
+            loss = -(dif_labels * torch.log(dif_pred_scores) + (1 - dif_labels) * torch.log(1 - dif_pred_scores)).mean()
         else:
             raise ValueError("Unknown loss type: {}".format(self.loss_type))
 
@@ -386,9 +392,13 @@ class CrossCompareReranker(nn.Module):
 
         self.tokenizer = tokenizer
 
-        self.disentangle_layer = MIDisentangledLayer(self.hidden_size)
-
-        self.head_layer = nn.Linear(4 * self.hidden_size, 1)
+        self.head_layer = nn.Sequential(
+            nn.Dropout(self.drop_out),
+            nn.Linear(2*self.hidden_size, 1*self.hidden_size),
+            nn.Tanh(),
+            nn.Dropout(self.drop_out),
+            nn.Linear(1 * self.hidden_size, 1),
+        )
 
 
         # parameters for dynamic epochs
@@ -396,20 +406,18 @@ class CrossCompareReranker(nn.Module):
         self.args['training_data_size'] = self.args.get('training_data_size', 0)
         self.args['n_candidates'] = self.args.get('n_candidates', -1)
 
-    def compute_loss(self, source_encs, cand1_encs, cand2_encs, left_score, right_scores):
+    def compute_loss(self, source_encs, cand1_encs, cand2_encs, left_scores, right_scores):
         device = source_encs.device
         loss = torch.tensor(0.0).to(source_encs.device)
-        # aux_loss, cand1_encs, cand2_encs = self.disentangle_layer(cand1_encs, cand2_encs)
-        # loss += aux_loss
         left_sim = F.cosine_similarity(source_encs, cand1_encs)
         right_sim = F.cosine_similarity(source_encs, cand2_encs)
         preds = left_sim - right_sim
-        dif_scores = left_score - right_scores
+        dif_scores = left_scores - right_scores
         if self.loss_type == "triplet":
             dif_scores_sign = torch.sign(dif_scores)
             cls_loss = torch.max(torch.zeros_like(preds), torch.abs(dif_scores) - dif_scores_sign * preds).mean()
             # add MSE loss
-            mse_loss = F.mse_loss(left_sim, left_score)
+            mse_loss = F.mse_loss(left_sim, left_scores)
             mse_loss += F.mse_loss(right_sim, right_scores)
             cls_loss += mse_loss
         elif self.loss_type == "BCE":
@@ -421,6 +429,17 @@ class CrossCompareReranker(nn.Module):
             cls_loss /= 2
         elif self.loss_type == "MSE":
             cls_loss = F.mse_loss(preds, dif_scores)
+        elif self.loss_type == "ranknet":
+            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
+            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
+            source_cand1_scores = self.head_layer(source_cand1_encs)
+            source_cand2_scores = self.head_layer(source_cand2_encs)
+            dif_pred_scores = source_cand1_scores - source_cand2_scores
+            dif_pred_scores = 1 / (1 + torch.exp(-dif_pred_scores))
+            dif_scores = left_scores - right_scores
+            dif_labels = torch.where(dif_scores > 0, torch.ones_like(dif_scores), torch.zeros_like(dif_scores))
+            dif_labels = torch.where(dif_scores == 0, torch.zeros_like(dif_scores)*0.5, dif_labels)
+            cls_loss = -(dif_labels * torch.log(dif_pred_scores) + (1 - dif_labels) * torch.log(1 - dif_pred_scores))
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += cls_loss
@@ -491,7 +510,7 @@ class CrossCompareReranker(nn.Module):
         }
         return outputs
 
-    def sampling(self, scores, n_pair, device, sampling_mode):
+    def sampling(self, scores):
         """
         Args:
             scores: [batch_size, n_candidates]
@@ -499,10 +518,12 @@ class CrossCompareReranker(nn.Module):
             device: torch.device
         """
         batch_size, n_candidates = scores.shape
+        n_pair = min(self.num_pos, self.num_neg)
+        device = scores.device
 
         sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates]
         # NOTE: different sampling strategy
-        if sampling_mode == "top_bottom":
+        if self.sub_sampling_mode == "top_bottom":
             # 1. top bottom sampling
             # self.args['training_steps'] += batch_size
             # cur_stage = self.args['training_steps'] // (self.args['training_data_size'] // self.args['n_candidates'] * 2)
@@ -513,11 +534,17 @@ class CrossCompareReranker(nn.Module):
             # neg_idx = sub_sorted_idx[:, -n_pair:]
             pos_idx = sorted_idx[:, :n_pair]
             neg_idx = sorted_idx[:, -n_pair:]
-        elif sampling_mode == "random":
+        elif self.sub_sampling_mode == "random":
             # 2. random sampling
             pos_idx = torch.randint(0, n_candidates, (batch_size, n_pair), device=device)
             neg_idx = torch.randint(0, n_candidates, (batch_size, n_pair), device=device)
-        elif sampling_mode == "poisson_dynamic":
+        elif self.sub_sampling_mode == "uniform":
+            # 3. uniform sampling
+            step = torch.tensor(n_candidates / (n_candidates * self.sub_sampling_ratio), dtype=torch.long)
+            pos_idx = sorted_idx[:, 0:-step:step]
+            neg_idx = sorted_idx[:, step::step]
+            n_pair = pos_idx.shape[1]
+        elif self.sub_sampling_mode == "poisson_dynamic":
             # 2. using rank dif as difficulty measure function
             self.args['training_steps'] += batch_size
             if self.args['training_steps'] > self.args['training_data_size']:
@@ -546,7 +573,7 @@ class CrossCompareReranker(nn.Module):
             # print(f"neg_idx: {neg_idx}") # debug
             # TODO: select unique pairs
         else:
-            raise ValueError(f"Unknown sampling mode: {sampling_mode}")
+            raise ValueError(f"Unknown sampling mode: {self.sub_sampling_mode}")
 
         shuffle_flag = torch.rand(batch_size, n_pair, device=device) < 0.5
         left_idx = torch.where(shuffle_flag, neg_idx, pos_idx)
@@ -591,8 +618,8 @@ class CrossCompareReranker(nn.Module):
                     self.args['n_candidates'] = n_candidates
                 scores = scores.mean(dim=-1)
 
-                n_pair = min(self.num_pos, self.num_neg)
-                left_idx, right_idx = self.sampling(scores, n_pair, device, self.sub_sampling_mode)
+
+                left_idx, right_idx = self.sampling(scores)
                 batch_idx = torch.arange(batch_size).unsqueeze(1)
 
                 candidate_pair_ids = candidate_pair_ids[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
