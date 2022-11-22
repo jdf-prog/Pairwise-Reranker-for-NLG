@@ -31,7 +31,7 @@ train_reranker.py \
     --reranker_type "scr" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_MoE_ranknet" \
+    --run_name "debug_ranknet_random" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -45,8 +45,8 @@ train_reranker.py \
     --gradient_accumulation_steps 32 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
-    --loss_type "MoE_ranknet" \
-    --sub_sampling_mode "uniform" \
+    --loss_type "ranknet" \
+    --sub_sampling_mode "random" \
     --sub_sampling_ratio 0.4 \
     --num_pos 1 \
     --num_neg 1 \

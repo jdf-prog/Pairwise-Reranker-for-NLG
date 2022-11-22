@@ -76,6 +76,7 @@ class SCRCollator(object):
         self.target_maxlength = self.candidate_maxlength
         self.source_prefix = source_prefix if source_prefix is not None else "<source>"
         self.candidate_prefix = candidate_prefix if candidate_prefix is not None else "<candidate>"
+        self.model_max_length = min(tokenizer.model_max_length, self.source_maxlength+self.candidate_maxlength+3)
 
 
     def __call__(self, batch):
@@ -92,8 +93,8 @@ class SCRCollator(object):
         source_texts = [[self.separate_token.join([self.source_prefix+s, self.candidate_prefix+c, c]) for c in cands] for s, cands in zip(batch_source, batch_candidates)] # concatenate source and target
         target_texts = [self.separate_token.join([self.source_prefix+s, self.candidate_prefix+t]) for s, t in zip(batch_source, batch_target)]
 
-        encoded_source_text_ids, encoded_source_text_masks = encode_batch_text(source_texts, self.tokenizer, self.tokenizer.model_max_length) # source
-        encoded_target_text_ids, encoded_target_text_masks = encode_texts(target_texts, self.tokenizer, self.tokenizer.model_max_length) # target
+        encoded_source_text_ids, encoded_source_text_masks = encode_batch_text(source_texts, self.tokenizer, self.model_max_length) # source
+        encoded_target_text_ids, encoded_target_text_masks = encode_texts(target_texts, self.tokenizer, self.model_max_length) # target
 
 
         return {
@@ -101,7 +102,7 @@ class SCRCollator(object):
             'attention_mask' : encoded_source_text_masks,
             'target_ids' : encoded_target_text_ids,
             'target_attention_mask' : encoded_target_text_masks,
-            'scores' : torch.stack(batch_scores, dim=0),
+            'scores' : torch.tensor(batch_scores),
         }
 
 class DualCollator(object):
@@ -156,7 +157,7 @@ class DualCollator(object):
             'target_attention_mask' : encoded_target_masks,
             "candidate_ids" : encoded_candidate_ids,
             "candidate_attention_mask" : encoded_candidate_masks,
-            'scores' : torch.stack(batch_scores, dim=0),
+            'scores' : torch.tensor(batch_scores),
         }
 
 class CrossCompareCollator(object):
@@ -218,7 +219,7 @@ class CrossCompareCollator(object):
         encoded_cand_pair_ids = torch.stack(encoded_cand_pair_ids, dim=0)
         encoded_cand_pair_masks = torch.stack(encoded_cand_pair_masks, dim=0)
 
-        scores = torch.stack(batch_scores, dim=0)
+        scores = torch.tensor(batch_scores)
         return {
             "candidate_pair_ids" : encoded_cand_pair_ids,
             "candidate_pair_attention_mask" : encoded_cand_pair_masks,
@@ -258,8 +259,8 @@ class CurriculumCrossCompareCollator(object):
         batch_target = [b['target'] for b in batch]
         batch_candidate1 = [b['candidate1'] for b in batch]
         batch_candidate2 = [b['candidate2'] for b in batch]
-        batch_score1 = torch.stack([b['score1'] for b in batch])
-        batch_score2 = torch.stack([b['score2'] for b in batch])
+        batch_score1 = torch.tensor([b['score1'] for b in batch])
+        batch_score2 = torch.tensor([b['score2'] for b in batch])
 
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidate1 = get_truncated_text(batch_candidate1, self.tokenizer, self.candidate_maxlength)
@@ -276,7 +277,7 @@ class CurriculumCrossCompareCollator(object):
         ]
         # print(batch_candidate_pairs)
         encoded_cand_pair_ids, encoded_cand_pair_masks = encode_texts(batch_candidate_pairs, self.tokenizer, self.tokenizer.model_max_length)
-        scores = torch.stack([batch_score1, batch_score2], dim=1)
+        scores = torch.stack([batch_score1, batch_score2], dim=-1)
 
         return {
             "candidate_pair_ids" : encoded_cand_pair_ids,
@@ -325,7 +326,7 @@ class DualCompareCollator(object):
         batch_cand_target_pairs = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
 
         target_rand_mat = torch.rand(batch_size, n_candidates) > 0.5
-        scores = torch.stack(batch_scores, dim=0)
+        scores = torch.tesnor(batch_scores)
         batch_cand_target_dif_scores = torch.where(target_rand_mat.unsqueeze(-1), scores - 1.0, 1.0 - scores)
 
         for bz in range(batch_size):
@@ -417,7 +418,7 @@ class DualFiDCollator(object):
         context_ids = torch.cat([source_ids[:, None], candidate_ids], dim=1)
         context_masks = torch.cat([source_mask[:, None], candidate_masks], dim=1)
 
-        scores = torch.stack([example['scores'] for example in batch], dim=0)
+        scores = torch.tensor([example['scores'] for example in batch])
 
         return {
             "input_ids": context_ids,
@@ -469,7 +470,7 @@ class FiDCollator(object):
             self.tokenizer,
             self.source_maxlength + self.candidate_maxlength)
 
-        scores = torch.stack([example['scores'] for example in batch], dim=0)
+        scores = torch.tensor([example['scores'] for example in batch])
 
         return {
             "input_ids": context_ids,

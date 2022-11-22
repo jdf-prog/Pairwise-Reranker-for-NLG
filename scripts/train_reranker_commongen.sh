@@ -2,8 +2,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --nodelist=ink-ellie
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2080:1
 #SBATCH -n 1
 
 # about 9 hours per training epoch
@@ -83,8 +82,8 @@ cd ../
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 25 \
 #     --candidate_maxlength 35 \
-#     --per_device_train_batch_size 16 \
-#     --per_device_eval_batch_size 128 \
+#     --per_device_train_batch_size 8 \
+#     --per_device_eval_batch_size 16 \
 #     --gradient_accumulation_steps 2 \
 #     --num_train_epochs 5 \
 #     --overwrite_output_dir True \
@@ -94,7 +93,9 @@ cd ../
 #     --num_neg 1 \
 #     --learning_rate 1e-5 \
 #     --using_metrics "bleu+cider" \
-#     # --evaluate_before_training True \
+#     --do_predict False \
+#     --max_train_data_size -1 \
+#     --evaluate_before_training True \
 #     # --load_checkpoint "./outputs/scr/roberta-large/basic_beam_30/checkpoint-1930" \
 
 
@@ -116,15 +117,17 @@ train_reranker.py \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 25 \
     --candidate_maxlength 35 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 128 \
-    --gradient_accumulation_steps 32 \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 16 \
+    --gradient_accumulation_steps 8 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
     --loss_type "ranknet" \
     --sub_sampling_mode "uniform" \
-    --sub_sampling_ratio 0.5 \
+    --sub_sampling_ratio 0.4 \
     --learning_rate 1e-5 \
     --using_metrics "bleu+cider" \
-    # --evaluate_before_training True \
+    --do_predict False \
+    --max_train_data_size -1 \
+    --evaluate_before_training True \
     # --load_checkpoint "./outputs/scr/roberta-large/basic_beam_30/checkpoint-1930" \

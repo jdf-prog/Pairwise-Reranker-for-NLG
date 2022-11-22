@@ -107,7 +107,7 @@ def main(args):
             tokenizer,
         )
         state_dict = torch.load(os.path.join(args.load_checkpoint, "pytorch_model.bin"))
-        load_result = model.load_state_dict(state_dict)
+        load_result = model.load_state_dict(state_dict, strict=False)
         if load_result.missing_keys:
             logging.warning(f"Missing keys: {load_result.missing_keys}")
         else:

@@ -27,7 +27,7 @@ class Dataset(torch.utils.data.Dataset):
             'source' : self.data[index]['source'],
             'target' : self.data[index]["target"],
             'candidates' : ["{}".format(c['text']) for c in self.data[index]['candidates'][:self.n_candidates]]  if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
-            'scores' : torch.tensor([[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidates]]) if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
+            'scores' : [[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidates]] if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
         }
 
     def get_example(self, index):

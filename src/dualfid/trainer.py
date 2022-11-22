@@ -108,20 +108,17 @@ def compute_metrics_for_scr(eval_pred: EvalPrediction) -> Dict[str, float]:
         "sel": {
             "acc": sel_acc,
             "rank": np.mean(sel_ranks),
-            "rouge1": np.mean(sel_scores[:, 0]),
-            "rouge2": np.mean(sel_scores[:, 1]),
-            "rougeL": np.mean(sel_scores[:, 2]),
         },
         "oracle": {
             "acc": oracle_sel_acc,
             "rank": np.mean(oracle_sel_ranks),
-            "rouge1": np.mean(oracle_sel_scores[:, 0]),
-            "rouge2": np.mean(oracle_sel_scores[:, 1]),
-            "rougeL": np.mean(oracle_sel_scores[:, 2]),
         },
-        "dev_score": np.mean(sel_scores[:, 1]), # dev score used for save checkpoint,
+        "dev_score": np.mean(sel_scores[:, 0]), # dev score used for save checkpoint,
         "NDCG": get_ndcg(pred_scores, agg_scores)
     }
+    for i in range(sel_scores.shape[-1]):
+        metrics["sel"]["metric{}".format(i+1)] = np.mean(sel_scores[:, i])
+        metrics["oracle"]["metric{}".format(i+1)] = np.mean(oracle_sel_scores[:, i])
     return metrics
 
 def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, float]:
