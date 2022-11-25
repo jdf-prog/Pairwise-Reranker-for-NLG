@@ -34,7 +34,7 @@ class Dataset(torch.utils.data.Dataset):
         return self.data[index]
 
 
-def load_data(data_path, args, mode='train'):
+def load_data(data_path, args, max_size=None):
     assert data_path, "data_path is not specified"
     print("Loading data from {}".format(data_path))
     if data_path.endswith('.jsonl'):
@@ -43,20 +43,8 @@ def load_data(data_path, args, mode='train'):
     elif data_path.endswith('.json'):
         with open(data_path, 'r') as fin:
             data = json.load(fin)
-    if mode == 'train':
-        max_size = args.max_train_data_size
-    elif mode == 'val':
-        max_size = args.max_eval_data_size
-    elif mode == 'predict':
-        max_size = args.max_predict_data_size
-    else:
-        raise ValueError("mode should be one of train, val, predict")
-    if max_size > 0:
-        random_indices = np.random.permutation(len(data))[:max_size]
-        data = [data[i] for i in random_indices]
-    else:
-        random_indices = np.random.permutation(len(data))
-        data = [data[i] for i in random_indices]
+    if max_size is not None and max_size > 0:
+        data = data[:max_size]
     examples = []
 
     for item in data:

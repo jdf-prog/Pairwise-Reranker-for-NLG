@@ -40,7 +40,7 @@ from src.dualfid.trainer import (
 from src.dualfid.curriculum import (
     CurriculumDataset,
     CurriculumCallback,
-    compute_metrics_for_curriculum,
+    compute_metrics_for_curriculum
 )
 
 def main(args):
@@ -57,9 +57,6 @@ def main(args):
     data_collator = build_collator(
         args.reranker_type, tokenizer,
         args.source_maxlength, args.candidate_maxlength,
-        # source_prefix="source text: ",
-        # candidate1_prefix="candidate text: ",
-        # candidate2_prefix="candidate text: ",
         curriculum_learning=args.curriculum_learning
     )
 
@@ -68,13 +65,21 @@ def main(args):
     eval_dataset = None
     predict_dataset = None
     if args.do_train:
-        train_examples = load_data(args.train_data_path, args, mode='train')
-        train_dataset = Dataset(train_examples, args.n_candidates)
+        if args.curriculum_indices_path is not None:
+            train_examples = load_data(args.train_data_path, args)
+            train_dataset = Dataset(train_examples, args.n_candidates)
+            indices = np.load(args.curriculum_indices_path)
+            random_indices = np.random.permutation(len(indices))[:args.max_train_data_size]
+            random_indices = np.sort(random_indices)
+            train_dataset.index_to_data = indices[random_indices]
+        else:
+            train_examples = load_data(args.train_data_path, args, max_size=args.max_train_data_size)
+            train_dataset = Dataset(train_examples, args.n_candidates)
     if args.do_eval:
-        eval_examples = load_data(args.eval_data_path, args, mode='val')
+        eval_examples = load_data(args.eval_data_path, args, max_size=args.max_eval_data_size)
         eval_dataset = Dataset(eval_examples, args.n_candidates)
     if args.do_predict:
-        predict_examples = load_data(args.test_data_path, args, mode='predict')
+        predict_examples = load_data(args.test_data_path, args, max_size=args.max_predict_data_size)
         predict_dataset = Dataset(predict_examples, args.n_candidates)
 
     if args.do_train:
@@ -168,9 +173,16 @@ def main(args):
     training_args.curriculum_learning = args.curriculum_learning
     training_args.num_curriculum = args.num_curriculum
     training_args.curriculum_size = args.curriculum_size
+    training_args.curriculum_indices_path = args.curriculum_indices_path
 
     logging.info(f"training args: {training_args}")
     logging.info(f"model config: {config}")
+    if args.reranker_type == "crosscompare":
+        compute_metrics = compute_metrics_for_crosscompare
+    else:
+        compute_metrics = compute_metrics_for_scr
+    if args.curriculum_learning:
+        compute_metrics = compute_metrics_for_curriculum
 
     trainer = RerankerTrainer(
         model=model,
@@ -247,7 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
       "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
-      "ranknet", "MoE_ranknet"
+      "ranknet", "MoE_ranknet", "lambdarank"
     ], default="BCE")
 
     # data config
@@ -263,7 +275,7 @@ if __name__ == "__main__":
         "uniform", "top_bottom", "top_random", "random_bottom",
         "importance", "random", "poisson_dynamic"
     ], default="top_bottom")
-    parser.add_argument("--max_train_data_size", type=int, default=25000)
+    parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)
     parser.add_argument("--max_predict_data_size", type=int, default=-1)
     parser.add_argument("--using_metrics", type=str, default="rouge1+rouge2+rougeLsum")
@@ -333,9 +345,13 @@ if __name__ == "__main__":
     parser.add_argument("--metric_for_best_model", type=str, default="dev_score")
 
     # curriculum learning
-    parser.add_argument("--curriculum_learning", type=str2bool, default=False)
+    parser.add_argument("--curriculum_learning", type=str, default=None,
+        choices=["self-adapted", "easy2hard", "error-based", None])
     parser.add_argument("--num_curriculum", type=int, default=1)
-    parser.add_argument("--curriculum_size", type=int, default=1000)
+    parser.add_argument("--curriculum_size", type=int, default=1000,
+        help="training data size for each curriculum as a epoch")
+    parser.add_argument("--curriculum_indices_path", type=str, default=None,
+        help="indices of curriculum data file")
 
     # init args
     args = parser.parse_args()
@@ -353,14 +369,8 @@ if __name__ == "__main__":
     # prepare for curriculum learning
     if args.curriculum_learning:
         print("Using curriculum learning")
+        args.num_curriculum = args.num_train_epochs
         Dataset = CurriculumDataset
-        compute_metrics = compute_metrics_for_curriculum
-        args.num_train_epochs *= args.num_curriculum # multiply epochs
-    elif args.reranker_type == "crosscompare":
-        compute_metrics = compute_metrics_for_crosscompare
-    else:
-        compute_metrics = compute_metrics_for_scr
-
 
     # set up logging
     if args.log_level == "passive":

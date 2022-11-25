@@ -108,7 +108,7 @@ train_reranker.py \
     --reranker_type "scr" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "train_commongen_ranknet" \
+    --run_name "train_commongen_ranknet_full_data" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -120,10 +120,10 @@ train_reranker.py \
     --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 16 \
     --gradient_accumulation_steps 8 \
-    --num_train_epochs 5 \
+    --num_train_epochs 1 \
     --overwrite_output_dir True \
     --loss_type "ranknet" \
-    --sub_sampling_mode "uniform" \
+    --sub_sampling_mode "random" \
     --sub_sampling_ratio 0.4 \
     --learning_rate 1e-5 \
     --using_metrics "bleu+cider" \

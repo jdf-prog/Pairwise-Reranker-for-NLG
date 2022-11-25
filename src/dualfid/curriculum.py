@@ -19,37 +19,38 @@ class CurriculumDataset(torch.utils.data.Dataset):
         self.data = data
         self.n_candidates = n_candidates if n_candidates is not None and n_candidates > 0 else None
         self.n_tasks = len(self.data[0]['candidates'][0]['scores']) if 'candidates' in self.data[0] else -1
-        self.index_to_data_index = []
+        self.index_to_data = []
         for i in range(len(data)):
-            for j in range(len(data[i]['candidates'])):
-                for k in range(j + 1, len(data[i]['candidates'])):
-                    self.index_to_data_index.append((i, j, k))
+            n_candidates = len(data[i]['candidates'])
+            random_indices = np.random.permutation(n_candidates)
+            pos_indices = random_indices
+            neg_indices = np.concatenate([random_indices[1:], random_indices[:1]])
+            for j, k in zip(pos_indices, neg_indices):
+                self.index_to_data.append((i,j,k))
         # subsampling, reduce the amount from O(n^2) to O(n)
-        subsampling_num = len(self.data) * n_candidates
-        self.index_to_data_index = np.array(self.index_to_data_index)
-        np.random.shuffle(self.index_to_data_index)
-        self.index_to_data_index = self.index_to_data_index[:int(subsampling_num)]
+        self.index_to_data = np.array(self.index_to_data)
 
 
     def __len__(self):
-        return len(self.index_to_data_index)
+        return len(self.index_to_data)
 
     def __getitem__(self, index):
-        i,j,k = self.index_to_data_index[index]
+        i,j,k = self.index_to_data[index]
         data = {
             'index' : index,
             'source' : self.data[i]['source'],
             'target' : self.data[i]["target"],
             'candidate1' : self.data[i]['candidates'][j]['text'],
             'candidate2' : self.data[i]['candidates'][k]['text'],
-            'score1' : torch.tensor([float(score) for score in self.data[i]['candidates'][j]['scores'].values()]),
-            'score2' : torch.tensor([float(score) for score in self.data[i]['candidates'][k]['scores'].values()]),
+            'score1' : [float(score) for score in self.data[i]['candidates'][j]['scores'].values()],
+            'score2' : [float(score) for score in self.data[i]['candidates'][k]['scores'].values()],
         }
         return data
 
 
 class CurriculumSampler(Sampler[int]):
-    r"""Samples elements randomly from a given list of indices, without replacement.
+    """Samples elements randomly from a given list of indices, without replacement.
+        no shuffle here
 
     Args:
         indices (sequence): a sequence of indices
@@ -68,12 +69,7 @@ class CurriculumSampler(Sampler[int]):
         self.num_curriculum = num_curriculum
         self.curriculum_size = len(self.data_source) // self.num_curriculum if curriculum_size is None else curriculum_size
         self.num_curriculum_learned = 0
-        self.shuffled_data_idx = np.arange(0, len(self.data_source))
-        np.random.shuffle(self.shuffled_data_idx)
-        self.indices = np.arange(0, self.curriculum_size)
-        self.indices = self.shuffled_data_idx[self.indices]
-
-        # 10 curriculum, 10000, 1000,
+        self.indices = np.arange(0, len(self.data_source))
 
 
     def __iter__(self) -> Iterator[int]:
@@ -92,13 +88,11 @@ class CurriculumSampler(Sampler[int]):
             indices = np.arange(
                 self.curriculum_size * self.num_curriculum_learned,
                 min(self.curriculum_size * (self.num_curriculum_learned + 1), len(self.data_source)))
-            indices = self.shuffled_data_idx[indices]
             self.num_curriculum_learned += 1
             return indices
         else:
             self.num_curriculum_learned = 0
             indices = np.arange(0, self.curriculum_size)
-            indices = self.shuffled_data_idx[indices]
             return indices
 
 
@@ -120,7 +114,7 @@ class CurriculumCallback(TrainerCallback):
         eval_dataloader: Optional[DataLoader],
         **kwargs):
         # Adjust the next epoch's data according to the model performance
-        if args.curriculum_learning:
+        if args.curriculum_learning == 'self-adapted':
             # print("Adjusting Curriculum")
             # print("Curriculum indices: ", train_dataloader.sampler.indices[:100])
             next_curriculum_indices = train_dataloader.sampler.get_next_curriculum_indices()
@@ -142,11 +136,11 @@ class CurriculumCallback(TrainerCallback):
             with tqdm(total=len(dataloader), desc="Selecting next curriculum") as progress_bar:
                 for inputs in dataloader:
                     with torch.no_grad():
-                        assert inputs['scores'].shape[1] == 2
+                        assert inputs['scores'].shape[2] == 2
                         inputs = {k: v.to(device) for k, v in inputs.items()}
                         outputs = model(**inputs)
                         pred = outputs['preds'].detach().cpu().numpy()
-                        dif_score = inputs["scores"][:, 0] - inputs["scores"][:, 1]
+                        dif_score = inputs["scores"][:, :, 0] - inputs["scores"][:, :, 1]
                         dif_score = dif_score.detach().cpu().numpy()
                         preds.append(pred)
                         dif_scores.append(dif_score.sum(-1))
@@ -162,11 +156,13 @@ class CurriculumCallback(TrainerCallback):
             print("accuracy", np.mean(~error_indices_flag))
             error_indices = np.array(next_curriculum_indices)[error_indices]
             right_indices = np.array(next_curriculum_indices)[right_indices]
-            selected_indices = np.concatenate([error_indices, right_indices[:len(right_indices) // 10]])
+            # selected_indices = np.concatenate([error_indices, right_indices[:len(right_indices) // 10]])
+            selected_indices = error_indices
             # print("Error indices global: ", error_indices[:100])
             assert len(selected_indices.shape) == 1
-            assert not set(selected_indices).intersection(set(train_dataloader.sampler.indices)), set(selected_indices).intersection(set(train_dataloader.sampler.indices))
             train_dataloader.sampler.update_indices(selected_indices)
+        else:
+            pass
         return control
 
 def compute_metrics_for_curriculum(eval_pred):
@@ -175,12 +171,19 @@ def compute_metrics_for_curriculum(eval_pred):
     Args:
 
     """
-    preds, labels = eval_pred # scores [batch_size, n_candidates, n_tasks]
-    pred_dif_scores = preds
-    dif_scores = (labels[:, 0].sum(-1) - labels[:, 1].sum(-1))
+    preds, labels = eval_pred
+    pred_dif_scores = preds # [batch_size]
+    scores = labels # [batch_size, n_tasks, 2]
+    batch_size, n_tasks, _ = scores.shape
+    assert scores.shape[-1] == 2, scores.shape
+    assert preds.shape == (batch_size,), preds.shape
+    scores = scores.mean(1) # [batch_size, 2]
+    left_scores = scores[:, 0]
+    right_scores = scores[:, 1]
+    dif_scores = (left_scores - right_scores)
+    assert pred_dif_scores.shape == dif_scores.shape, (pred_dif_scores.shape, dif_scores.shape)
     correct_flag = pred_dif_scores * dif_scores > 0
     acc = np.mean(correct_flag)
-
     metrics = {
         "acc": acc,
         "dev_score": acc,

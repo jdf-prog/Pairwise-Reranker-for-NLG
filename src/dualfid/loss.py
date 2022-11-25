@@ -273,3 +273,57 @@ def ApproxNDCG_loss(scores, rels, temperature=0.1, k=10):
     ndcg = dcg / idcg
     return 1 - ndcg.mean()
 
+def ranknet_loss(pred_scores, scores):
+    """
+    Args:
+        pred_scores: [batch_size, n_candidates], 30, 30 -> 15
+        scores: [batch_size, n_candidates]
+
+    """
+    dif_pred_scores = pred_scores.unsqueeze(1) - pred_scores.unsqueeze(2)
+    dif_pred_scores = 1 / (1 + torch.exp(-dif_pred_scores))
+    dif_scores = scores.unsqueeze(1) - scores.unsqueeze(2)
+    dif_labels = torch.where(dif_scores > 0, torch.ones_like(dif_scores), torch.zeros_like(dif_scores))
+    dif_labels = torch.where(dif_scores == 0, torch.ones_like(dif_scores) * 0.5, dif_labels)
+    loss = -(dif_labels * torch.log(dif_pred_scores) + (1 - dif_labels) * torch.log(1 - dif_pred_scores)).mean()
+    return loss
+
+def lambdarank_loss(pred_scores, scores):
+    """
+    Args:
+        pred_scores: [batch_size, n_candidates]
+        scores: [batch_size, n_candidates]
+    """
+    batch_size, n_candidates = pred_scores.shape
+
+    dif_pred_scores = pred_scores.unsqueeze(1) - pred_scores.unsqueeze(2)
+    dif_pred_scores = 1 / (1 + torch.exp(-dif_pred_scores))
+
+    # compute delta ndcg
+    idcg = [get_dcg(scores[i], scores[i]) for i in range(batch_size)]
+    idcg = torch.stack(idcg, dim=0).sum(dim=1)
+    # print("idcg", idcg)
+    ranks = torch.argsort(pred_scores, dim=1, descending=True) + 1
+    # print("ranks", ranks)
+    # print("scores", scores)
+    # print("pred_scores", pred_scores)
+    # print("dif_pred_scores", dif_pred_scores)
+    gain_diff = scores.unsqueeze(1) - scores.unsqueeze(2)
+    decay_diff = 1 / torch.log2(ranks.unsqueeze(1) + 1) - 1 / torch.log2(ranks.unsqueeze(2) + 1)
+    delta_ndcg = gain_diff * decay_diff / idcg.unsqueeze(1).unsqueeze(2)
+    delta_ndcg = torch.abs(delta_ndcg)
+    # print("gain_diff", gain_diff)
+    # print("decay_diff", decay_diff)
+    # print("delta_ndcg", delta_ndcg)
+    delta_ndcg = torch.where(delta_ndcg==0.0, torch.ones_like(delta_ndcg), delta_ndcg)
+    # multiply delta ndcg
+    dif_pred_scores = dif_pred_scores * delta_ndcg
+
+    # compute labels
+    dif_scores = scores.unsqueeze(1) - scores.unsqueeze(2)
+    dif_labels = torch.where(dif_scores > 0, torch.ones_like(dif_scores), torch.zeros_like(dif_scores))
+    dif_labels = torch.where(dif_scores == 0, torch.ones_like(dif_scores) * 0.5, dif_labels)
+
+    # compute loss
+    loss = -(dif_labels * torch.log(dif_pred_scores) + (1 - dif_labels) * torch.log(1 - dif_pred_scores)).mean()
+    return loss

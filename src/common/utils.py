@@ -29,3 +29,13 @@ def empty2None(x):
         return x
     else:
         raise argparse.ArgumentTypeError('String value expected.')
+
+def empty2zero(x):
+    if x == '':
+        return 0
+    elif isinstance(x, int):
+        return x
+    elif isinstance(x, str):
+        return int(x)
+    else:
+        raise argparse.ArgumentTypeError('Integer value expected.')

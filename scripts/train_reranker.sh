@@ -31,7 +31,7 @@ train_reranker.py \
     --reranker_type "scr" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_ranknet_random" \
+    --run_name "debug_lambdarank" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -43,9 +43,9 @@ train_reranker.py \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 32 \
-    --num_train_epochs 5 \
+    --num_train_epochs 2 \
     --overwrite_output_dir True \
-    --loss_type "ranknet" \
+    --loss_type "lambdarank" \
     --sub_sampling_mode "random" \
     --sub_sampling_ratio 0.4 \
     --num_pos 1 \
@@ -185,15 +185,14 @@ train_reranker.py \
 #     --per_device_train_batch_size 4 \
 #     --per_device_eval_batch_size 32 \
 #     --gradient_accumulation_steps 8 \
-#     --num_train_epochs 3 \
+#     --num_train_epochs 50 \
 #     --overwrite_output_dir True \
 #     --num_pos 2 \
 #     --num_neg 2 \
 #     --loss_type "BCE" \
 #     --sub_sampling_mode "top_bottom" \
-#     --curriculum_learning True \
+#     --curriculum_learning "self-adapted" \
 #     --curriculum_size 5000 \
-#     --num_curriculum 50 \
 #     --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
 #     --evaluate_before_training True \
 #     --evaluation_strategy "steps" \

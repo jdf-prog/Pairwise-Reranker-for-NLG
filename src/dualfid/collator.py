@@ -248,6 +248,7 @@ class CurriculumCrossCompareCollator(object):
         self.source_prefix = source_prefix if source_prefix is not None else "<source>"
         self.candidate1_prefix = candidate1_prefix if candidate1_prefix is not None else "<candidate1>"
         self.candidate2_prefix = candidate2_prefix if candidate2_prefix is not None else "<candidate2>"
+        self.max_length = min(self.tokenizer.model_max_length, self.source_maxlength + 2 * self.candidate_maxlength + 6)
 
         # add prefix
         tokenizer.add_tokens([self.source_prefix, self.candidate1_prefix, self.candidate2_prefix]) # debug
@@ -266,17 +267,16 @@ class CurriculumCrossCompareCollator(object):
         batch_candidate1 = get_truncated_text(batch_candidate1, self.tokenizer, self.candidate_maxlength)
         batch_candidate2 = get_truncated_text(batch_candidate2, self.tokenizer, self.candidate_maxlength)
 
-        shuffle_flag = torch.rand(batch_size) > 0.5
         batch_candidate_pairs = [
             self.separate_token.join([
                 batch_source[i],
-                self.candidate1_prefix+(batch_candidate1[i] if shuffle_flag[i] else batch_candidate2[i]),
-                self.candidate2_prefix+(batch_candidate2[i] if shuffle_flag[i] else batch_candidate1[i]),
+                self.candidate1_prefix+batch_candidate1[i],
+                self.candidate2_prefix+batch_candidate2[i],
             ])
             for i in range(batch_size)
         ]
         # print(batch_candidate_pairs)
-        encoded_cand_pair_ids, encoded_cand_pair_masks = encode_texts(batch_candidate_pairs, self.tokenizer, self.tokenizer.model_max_length)
+        encoded_cand_pair_ids, encoded_cand_pair_masks = encode_texts(batch_candidate_pairs, self.tokenizer, self.max_length)
         scores = torch.stack([batch_score1, batch_score2], dim=-1)
 
         return {
