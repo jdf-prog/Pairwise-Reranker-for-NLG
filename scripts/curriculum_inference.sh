@@ -6,7 +6,8 @@
 #SBATCH -n 1
 
 dataset="cnndm"
-data_path="./data/prepared/${dataset}/train/dataset.50000_100000.jsonl"
+# data_path="./data/prepared/${dataset}/train/dataset.50000_100000.jsonl"
+data_path="./data/prepared/${dataset}/test/dataset.jsonl"
 
 nvidia-smi
 
@@ -35,10 +36,12 @@ curriculum_inference.py \
     --per_device_eval_batch_size 32 \
     --overwrite_output_dir True \
     --loss_type "BCE" \
-    --max_data_size -1 \
+    --max_data_size 100 \
     --num_shards "$num_shards" \
     --shard_id "$shard_id" \
-    --load_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm/checkpoint-9375" \
+    --load_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm_curriculum_right-based/checkpoint-best" \
+    --output_dir "./temp"
+    # --load_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm/checkpoint-9375" \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 100 \

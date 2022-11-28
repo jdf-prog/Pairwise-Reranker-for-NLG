@@ -9,16 +9,16 @@ nvidia-smi
 
 localhost=$RANDOM
 
-torchrun \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint="localhost:${localhost}" \
-    --nnodes 1 \
-    --nproc_per_node 1 \
-train_baseline.py \
-    --dataset cnndm \
-    --model_type pegasus \
-    --model google/pegasus-large \
-    --model_name pegasus_cnndm_2_half \
+# torchrun \
+#     --rdzv_backend=c10d \
+#     --rdzv_endpoint="localhost:${localhost}" \
+#     --nnodes 1 \
+#     --nproc_per_node 1 \
+# train_baseline.py \
+#     --dataset cnndm \
+#     --model_type pegasus \
+#     --model google/pegasus-large \
+#     --model_name pegasus_cnndm_2_half \
 
 # torchrun \
 #     --rdzv_backend=c10d \
@@ -53,3 +53,14 @@ train_baseline.py \
 #     --model t5-large \
 #     --model_name t5_common_gen_1_half \
 #     --do_predict False \
+
+torchrun \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint="localhost:${localhost}" \
+    --nnodes 1 \
+    --nproc_per_node 1 \
+train_baseline.py \
+    --dataset commongen \
+    --model_type t5 \
+    --model t5-large \
+    --model_name t5_common_gen \

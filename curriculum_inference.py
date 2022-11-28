@@ -60,6 +60,8 @@ def main(args):
         offset = sum([len(examples[i]) for i in range(args.shard_id)])
         examples = examples[args.shard_id]
         logging.info(f"shard_id: {args.shard_id}, offset: {offset}")
+    else:
+        offset = 0
     dataset = CurriculumDataset(examples, args.n_candidates)
     args.n_tasks = dataset.n_tasks
 

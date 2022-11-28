@@ -72,6 +72,7 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, ma
         targets = targets[:max_size]
     ds = CustomDataset.from_raw(sources, targets)
     ds.to_jsonl(file_path)
+    print(f"Saved rawdataset {dataset_name} to {file_path}.")
 
 def exist_pkl_candidates(dataset_name, set_name, generation_method, model_name, start_idx=None, end_idx=None):
     """
@@ -111,6 +112,7 @@ def save_pkl_candidates(dataset_name, set_name, generation_method, model_name, c
     pkl_path.mkdir(parents=True, exist_ok=True)
     shard_postfix = f".{start_idx}_{end_idx}" if start_idx is not None and end_idx is not None else ""
     torch.save(candidates, pkl_path / f"candidates{postfix}.pkl{shard_postfix}")
+    print(f"Saved candidates to {pkl_path / f'candidates{postfix}.pkl{shard_postfix}'}")
 
 def load_pkl_cand_scores(dataset_name, set_name, generation_method, model_name, metric_name):
     """
@@ -135,6 +137,7 @@ def save_pkl_cand_scores(dataset_name, set_name, generation_method, model_name, 
     pkl_path = cur_folder.parent.parent / 'data' / dataset_name / set_name / generation_method
     pkl_path.mkdir(parents=True, exist_ok=True)
     torch.save(scores, pkl_path / f"cand_scores_{model_name}_{metric_name}.pkl")
+    print(f"Saved the candidate scores to {pkl_path / f'cand_scores_{model_name}_{metric_name}.pkl'}")
 
 def load_pkl_sources_and_targets(dataset_name, set_name, start_idx=None, end_idx=None):
     """
@@ -167,7 +170,7 @@ def save_pkl_sources_and_targets(dataset_name, set_name, sources, targets, start
     torch.save(sources, set_path / f"sources.pkl{shard_postfix}")
     torch.save(targets, set_path / f"targets.pkl{shard_postfix}")
     assert len(sources) == len(targets)
-    print("Saved the data to pkl files!")
+    print(f"Saved the data to pkl files:", set_path / f"sources.pkl{shard_postfix}", set_path / f"targets.pkl{shard_postfix}")
 
 def load_prepared_dataset(dataset_name, set_name, models:list=None, generation_methods:list=None, metrics:list=None) -> CustomDataset:
     """
@@ -207,6 +210,7 @@ def save_prepared_dataset(dataset_name, set_name, dataset: CustomDataset):
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     ds_path = cur_folder.parent.parent / 'data' / 'prepared' / dataset_name / set_name / 'dataset.jsonl'
     dataset.to_jsonl(ds_path)
+    print(f"Saved the prepared dataset to {ds_path}")
 
 def get_candidate_types(dataset_name, set_name):
     """

@@ -52,10 +52,14 @@ def main(args):
         print("Checking candidates scores from -- model:{} \t generation method:{}".format(model_name, generation_method))
         scored_metrics = get_candidate_metrics(args.dataset, args.set, model_name, generation_method)
         print("Scored metrics: {}".format(scored_metrics))
-        to_score_metrics = [metric for metric in metrics if metric not in scored_metrics]
-        if len(to_score_metrics) == 0:
-            print("All metrics are already computed for -- model:{} \t generation method:{}".format(model_name, generation_method))
-            continue
+        if args.overwrite:
+            to_score_metrics = metrics
+            print("Overwrite mode: all metrics will be scored")
+        else:
+            to_score_metrics = [metric for metric in metrics if metric not in scored_metrics]
+            if len(to_score_metrics) == 0:
+                print("All metrics are already computed for -- model:{} \t generation method:{}".format(model_name, generation_method))
+                continue
         print("Computing metrics: {}".format(to_score_metrics))
         candidates = load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
         scores = overall_eval(candidates, targets, to_score_metrics, args.num_workers)
@@ -75,6 +79,7 @@ if __name__ == "__main__":
     parser.add_argument("--set", type=str, default="val")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=1)
+    parser.add_argument("--overwrite", type=str2bool, default=False)
     # metrics
     parser.add_argument("--metrics", type=str, default="rouge,bleu",
         help="metrics to compute, support rouge, bleu, bleurt, cider, spice")

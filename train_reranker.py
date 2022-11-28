@@ -72,6 +72,7 @@ def main(args):
             random_indices = np.random.permutation(len(indices))[:args.max_train_data_size]
             random_indices = np.sort(random_indices)
             train_dataset.index_to_data = indices[random_indices]
+            logging.info(f"Using indices from {args.curriculum_indices_path} ({len(random_indices)}/{len(indices)})")
         else:
             train_examples = load_data(args.train_data_path, args, max_size=args.max_train_data_size)
             train_dataset = Dataset(train_examples, args.n_candidates)
@@ -259,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
       "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
-      "ranknet", "MoE_ranknet", "lambdarank"
+      "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint"
     ], default="BCE")
 
     # data config

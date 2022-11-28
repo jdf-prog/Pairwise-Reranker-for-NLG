@@ -160,10 +160,6 @@ def main(args):
         # add offsets for saving
         args.start_idx += offsets[0]
         args.end_idx += offsets[0]
-    else:
-        # add offsets for saving, so that the idx are true with respect to the original whole dataset
-        args.start_idx = offsets[0]
-        args.end_idx = offsets[1]
     print("Idxs used for saving: {} - {}".format(args.start_idx, args.end_idx))
 
     print("Cutting data to {} below samples".format(args.max_val_size))
@@ -204,7 +200,7 @@ def main(args):
     print("\nThe model has {} trainable parameters".format(n_params))
     model = model.to(device)
     # summary generation
-    sources, candidates, targets = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
+    _, candidates, _ = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
 
     # export
     if args.save_candidates:
@@ -229,6 +225,7 @@ class GenerationDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, item):
         source = self.prefix + self.sources[item]
+        # source = self.sources[item] # debug
         target = self.targets[item]
 
         source_inputs = self.tokenizer(source, return_tensors="pt", max_length=self.source_max_length, padding='max_length')

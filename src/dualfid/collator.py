@@ -146,9 +146,9 @@ class DualCollator(object):
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
         batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
         # tokenize
-        encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.tokenizer.model_max_length) # source
-        encoded_target_ids, encoded_target_masks = encode_texts(batch_target, self.tokenizer, self.tokenizer.model_max_length) # target
-        encoded_candidate_ids, encoded_candidate_masks = encode_batch_text(batch_candidates, self.tokenizer, self.tokenizer.model_max_length) # candidates
+        encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.source_maxlength) # source
+        encoded_target_ids, encoded_target_masks = encode_texts(batch_target, self.tokenizer, self.candidate_maxlength) # target
+        encoded_candidate_ids, encoded_candidate_masks = encode_batch_text(batch_candidates, self.tokenizer, self.candidate_maxlength) # candidates
 
         return {
             'source_ids' : encoded_source_ids,

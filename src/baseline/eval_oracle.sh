@@ -4,11 +4,11 @@
 #SBATCH --output ../../jobs/%j.out
 #SBATCH --cpus-per-task=4
 
-python eval_oracle.py \
-    --dataset cnndm \
-    --set train \
-    --metrics "rouge" \
-    --num_workers 4 \
+# python eval_oracle.py \
+#     --dataset cnndm \
+#     --set train \
+#     --metrics "rouge" \
+#     --num_workers 4 \
 
 # python eval_oracle.py \
 #     --dataset xsum \
@@ -22,8 +22,9 @@ python eval_oracle.py \
 #     --metrics "bleu" \
 #     --num_workers 1 \
 
-# python eval_oracle.py \
-#     --dataset commongen \
-#     --set val \
-#     --metrics "bleu,cider" \
-#     --num_workers 1 \
+python eval_oracle.py \
+    --dataset commongen \
+    --set val \
+    --metrics "bleu,cider" \
+    --num_workers 1 \
+    --overwrite True

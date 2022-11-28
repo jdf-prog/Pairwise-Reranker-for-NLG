@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=3:00:00
+#SBATCH --time=10:00:00
 #SBATCH --job-name=generate_candidates
 #SBATCH --output ../../jobs/%j.out
 #SBATCH --gres=gpu:2080:1
@@ -85,28 +85,29 @@
 # commongen
 ######################################################
 
-# # commongen
-# for set in "train" "val" "test"
-# do
-#     for method in "diverse_beam_search" "beam_search"
-#     do
-#
-#         python generate_candidate.py \
-#         --dataset commongen \
-#         --model_type t5 \
-#         --model mrm8488/t5-base-finetuned-common_gen \
-#         --model_name t5_common_gen \
-#         --load_model False \
-#         --set ${set} \
-#         --inference_bs 16 \
-#         --save_candidates True \
-#         --generation_method ${method} \
-#         --num_return_sequences 15 \
-#         --num_beams 15 \
-#         --num_beam_groups 15
+# commongen
+for set in "test" "val"
+do
+    for method in "diverse_beam_search" "beam_search"
+    do
 
-#     done
-# done
+        python generate_candidate.py \
+        --dataset commongen \
+        --model_type t5 \
+        --model t5-large \
+        --model_name t5_common_gen \
+        --load_model True \
+        --load_model_path "../../models/t5_common_gen/checkpoint-best" \
+        --set ${set} \
+        --inference_bs 10 \
+        --save_candidates True \
+        --generation_method ${method} \
+        --num_return_sequences 15 \
+        --num_beams 15 \
+        --num_beam_groups 15
+
+    done
+done
 
 #######################################################
 # Generate candidates using our half-fine-tuned models
@@ -146,24 +147,24 @@
 # with model trained on 2-half of the training data
 ######################################################
 
-for method in "diverse_beam_search" "beam_search"
-do
-    python generate_candidate.py \
-    --dataset commongen \
-    --model_type t5 \
-    --model t5-large \
-    --model_name t5_common_gen_half \
-    --load_model True \
-    --load_model_path "../../models/t5_common_gen_2_half/checkpoint-best" \
-    --partition '1_half' \
-    --set 'train' \
-    --inference_bs 10 \
-    --save_candidates True \
-    --generation_method $method \
-    --num_return_sequences 15 \
-    --num_beams 15 \
-    --num_beam_groups 15
-done
+# for method in "diverse_beam_search" "beam_search"
+# do
+#     python generate_candidate.py \
+#     --dataset commongen \
+#     --model_type t5 \
+#     --model t5-large \
+#     --model_name t5_common_gen_half \
+#     --load_model True \
+#     --load_model_path "../../models/t5_common_gen_2_half/checkpoint-best" \
+#     --partition '1_half' \
+#     --set 'train' \
+#     --inference_bs 10 \
+#     --save_candidates True \
+#     --generation_method $method \
+#     --num_return_sequences 15 \
+#     --num_beams 15 \
+#     --num_beam_groups 15
+# done
 
 ######################################################
 # For cnndm

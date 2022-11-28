@@ -181,12 +181,12 @@ if __name__ == '__main__':
         choices = ["google/pegasus-large", "facebook/bart-large", "t5-large", "google/mt5-large"])
     parser.add_argument('--model_name', type=str, default = "pegasus_cnndm_1_half",
         choices = [
-            "pegasus_cnndm_1_half", "pegasus_cnndm_2_half",
-            "bart_cnndm_1_half", "bart_cnndm_2_half",
-            "pegasus_xsum_1_half", "pegasus_xsum_2_half",
-            "bart_xsum_1_half", "bart_xsum_2_half",
-            "t5_wmt18_1_half", "t5_wmt18_2_half",
-            "t5_common_gen_1_half", "t5_common_gen_2_half"
+            "pegasus_cnndm_1_half", "pegasus_cnndm_2_half", "pegasus_cnndm",
+            "bart_cnndm_1_half", "bart_cnndm_2_half", "bart_cnndm",
+            "pegasus_xsum_1_half", "pegasus_xsum_2_half", "pegasus_xsum",
+            "bart_xsum_1_half", "bart_xsum_2_half", "bart_xsum",
+            "t5_wmt18_1_half", "t5_wmt18_2_half", "t5_wmt18",
+            "t5_common_gen_1_half", "t5_common_gen_2_half", "t5_common_gen"
     ])
     parser.add_argument('--dataset', type=str, default = "cnndm",
         choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
