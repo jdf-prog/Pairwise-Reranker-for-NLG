@@ -129,7 +129,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_BCE" \
+    --run_name "debug_ranknet" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -145,14 +145,14 @@ train_reranker.py \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \
-    --loss_type "BCE" \
-    --sub_sampling_mode "top_bottom" \
-    --sub_sampling_ratio 0.4 \
+    --loss_type "ranknet" \
+    --sub_sampling_mode "uniform" \
+    --sub_sampling_ratio 0.1 \
     --evaluation_strategy "steps" \
     --save_strategy "steps" \
     --eval_steps 200 \
     --save_steps 200 \
-    --max_grad_norm 100.0 \
+    # --max_grad_norm 100.0 \
     # --lr_scheduler_type "cosine" \
     # --save_total_limit 10 \
     # --learning_rate 1e-5 \

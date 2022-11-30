@@ -274,7 +274,7 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance", "random", "poisson_dynamic"
+        "importance", "random", "poisson_dynamic", "top_bottom_random"
     ], default="top_bottom")
     parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)

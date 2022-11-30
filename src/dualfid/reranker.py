@@ -447,7 +447,7 @@ class CrossCompareReranker(nn.Module):
         self.args['training_data_size'] = self.args.get('training_data_size', 0)
         self.args['n_candidates'] = self.args.get('n_candidates', -1)
 
-    def compute_loss(self, source_encs, cand1_encs, cand2_encs, left_scores, right_scores):
+    def compute_loss(self, source_encs, cand1_encs, cand2_encs, left_scores, right_scores, reduce="linear"):
         """
         Args:
             source_encs: [batch_size, hidden_size]
@@ -459,29 +459,8 @@ class CrossCompareReranker(nn.Module):
 
         device = source_encs.device
         loss = torch.tensor(0.0).to(source_encs.device)
-        if self.loss_type == "triplet":
-            left_sim = F.cosine_similarity(source_encs, cand1_encs)
-            right_sim = F.cosine_similarity(source_encs, cand2_encs)
-            preds = left_sim - right_sim
-            dif_scores = (left_scores - right_scores).mean(-1)
-            dif_scores_sign = torch.sign(dif_scores)
-            cls_loss = torch.max(torch.zeros_like(preds), torch.abs(dif_scores) - dif_scores_sign * preds).mean()
-            # add MSE loss
-            mse_loss = F.mse_loss(left_sim, left_scores)
-            mse_loss += F.mse_loss(right_sim, right_scores)
-            cls_loss += mse_loss
-        elif self.loss_type == "BCE":
-            left_sim = F.cosine_similarity(source_encs, cand1_encs)
-            right_sim = F.cosine_similarity(source_encs, cand2_encs)
-            preds = left_sim - right_sim
-            dif_scores = (left_scores - right_scores).mean(-1)
-            left_labels = (dif_scores > 0).float()
-            right_labels = (dif_scores < 0).float()
-            cls_loss = torch.tensor(0.0, device=device)
-            cls_loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
-            cls_loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
-            cls_loss /= 2
-        elif self.loss_type == "MSE":
+        assert reduce in ["moe", "cosine", "linear"]
+        if reduce == "moe":
             source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
             source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
             # MOE
@@ -496,32 +475,48 @@ class CrossCompareReranker(nn.Module):
             source_cand2_pred_scores = torch.cat([
                 tower(source_cand2_pred) for source_cand2_pred, tower in zip(source_cand2_preds, self.towers)
             ], dim=-1)
-            # # fc
+        elif reduce == "cosine":
+            source_cand1_pred_scores = torch.cosine_similarity(source_encs, cand1_encs, dim=-1)
+            source_cand2_pred_scores = torch.cosine_similarity(source_encs, cand2_encs, dim=-1)
+        elif reduce == "linear":
+            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
+            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
+            source_cand1_pred_scores = self.head_layer(source_cand1_encs)
+            source_cand2_pred_scores = self.head_layer(source_cand2_encs)
+        else:
+            raise NotImplementedError
 
-            # source_cand1_pred_scores = self.head_layer(source_cand1_encs)
-            # source_cand2_pred_scores = self.head_layer(source_cand2_encs)
-
+        if self.loss_type == "triplet":
+            dif_scores = (left_scores - right_scores)
+            dif_scores_sign = torch.sign(dif_scores)
+            cls_loss = torch.max(torch.zeros_like(preds), torch.abs(dif_scores) - dif_scores_sign * preds).mean()
+            # add MSE loss
+            mse_loss = F.mse_loss(source_cand1_pred_scores, left_scores)
+            mse_loss += F.mse_loss(source_cand2_pred_scores, right_scores)
+            cls_loss += mse_loss
+        elif self.loss_type == "BCE":
+            dif_scores = (left_scores - right_scores)
+            left_labels = (dif_scores > 0).float()
+            right_labels = (dif_scores < 0).float()
+            cls_loss = torch.tensor(0.0, device=device)
+            cls_loss += F.binary_cross_entropy_with_logits(source_cand1_pred_scores, left_labels)
+            cls_loss += F.binary_cross_entropy_with_logits(source_cand2_pred_scores, right_labels)
+            cls_loss /= 2
+        elif self.loss_type == "MSE":
             cls_loss = torch.tensor(0.0, device=device)
             cls_loss += F.mse_loss(source_cand1_pred_scores, left_scores)
             cls_loss += F.mse_loss(source_cand2_pred_scores, right_scores)
             cls_loss -= (2 * (source_cand1_pred_scores - source_cand2_pred_scores) * (left_scores - right_scores)).mean()
             cls_loss += cand1_aux_loss + cand2_aux_loss
-            preds = source_cand1_pred_scores - source_cand2_pred_scores
         elif self.loss_type == "ranknet":
-            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
-            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
-            source_cand1_pred_scores = self.head_layer(source_cand1_encs)
-            source_cand2_pred_scores = self.head_layer(source_cand2_encs)
-            dif_pred_scores = source_cand1_pred_scores - source_cand2_pred_scores
-            dif_pred_scores = 1 / (1 + torch.exp(-dif_pred_scores))
-            dif_scores = left_scores - right_scores
-            dif_labels = torch.where(dif_scores > 0, torch.ones_like(dif_scores), torch.zeros_like(dif_scores))
-            dif_labels = torch.where(dif_scores == 0, torch.zeros_like(dif_scores)*0.5, dif_labels)
-            cls_loss = -(dif_labels * torch.log(dif_pred_scores) + (1 - dif_labels) * torch.log(1 - dif_pred_scores)).mean()
-            preds = dif_pred_scores
+            preds_scores = torch.cat([source_cand1_pred_scores, source_cand2_pred_scores], dim=0).transpose(0, 1)
+            scores = torch.cat([left_scores, right_scores], dim=0).transpose(0, 1)
+            cls_loss = ranknet_loss(preds_scores, scores)
+            preds = source_cand1_pred_scores - source_cand2_pred_scores
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += cls_loss
+        preds = source_cand1_pred_scores - source_cand2_pred_scores
         if preds.dim() == 2:
             preds = preds.mean(-1)
         return loss, preds
@@ -532,7 +527,7 @@ class CrossCompareReranker(nn.Module):
         attention_mask,
         left_scores,
         right_scores,
-        reduce="mean"
+        reduce="special"
     ):
         """
             Compute scores for each candidate pairs
@@ -581,17 +576,28 @@ class CrossCompareReranker(nn.Module):
         else:
             raise ValueError(f"Unknown reduce type: {reduce}")
 
-
-        # get the exclusive encodings of cand1 and cand2
-        loss, pred_probs = self.compute_loss(source_encs, cand1_encs, cand2_encs, left_scores, right_scores)
+        if len(original_shape) == 2:
+            loss = torch.tensor(0.0, device=device)
+            pred_probs = []
+            batch_size, n_candidates = original_shape
+            source_encs = source_encs.view(batch_size, n_candidates, -1)
+            cand1_encs = cand1_encs.view(batch_size, n_candidates, -1)
+            cand2_encs = cand2_encs.view(batch_size, n_candidates, -1)
+            left_scores = left_scores.view(batch_size, n_candidates, -1)
+            right_scores = right_scores.view(batch_size, n_candidates, -1)
+            for i in range(batch_size):
+                _loss, _pred_probs = self.compute_loss(source_encs[i], cand1_encs[i], cand2_encs[i], left_scores[i], right_scores[i])
+                loss += _loss
+                pred_probs.append(_pred_probs)
+            loss /= batch_size
+            pred_probs = torch.cat(pred_probs, dim=0)
+        else:
+            loss, pred_probs = self.compute_loss(source_encs, cand1_encs, cand2_encs, left_scores, right_scores)
 
         pred_probs = pred_probs.view(*original_shape)
         outputs = {
             "loss": loss,
             "preds": pred_probs,
-            "source_encs": source_encs,
-            "cand1_encs": cand1_encs,
-            "cand2_encs": cand2_encs,
         }
         return outputs
 
@@ -619,6 +625,14 @@ class CrossCompareReranker(nn.Module):
             # neg_idx = sub_sorted_idx[:, -n_pair:]
             pos_idx = sorted_idx[:, :n_pair]
             neg_idx = sorted_idx[:, -n_pair:]
+        elif self.sub_sampling_mode == "top_bottom_random":
+            top_bottom_n_pair = (n_pair + 1) // 2
+            random_n_pair = n_pair - top_bottom_n_pair
+            pos_idx = sorted_idx[:, :top_bottom_n_pair]
+            neg_idx = sorted_idx[:, -top_bottom_n_pair:]
+            pos_idx = torch.cat([pos_idx, torch.randint(top_bottom_n_pair, n_candidates - top_bottom_n_pair, (batch_size, random_n_pair), device=device)], dim=1)
+            neg_idx = torch.cat([neg_idx, torch.randint(top_bottom_n_pair, n_candidates - top_bottom_n_pair, (batch_size, random_n_pair), device=device)], dim=1)
+
         elif self.sub_sampling_mode == "random":
             # 2. random sampling
             n_pair = int(n_candidates * self.sub_sampling_ratio)
@@ -982,12 +996,12 @@ class DualCompareReranker(nn.Module):
 
             # commpute similarity
             expanded_source_encs = source_encs.unsqueeze(1).expand(-1, n_pair, -1).reshape(batch_size * n_pair, -1) # [batch_size * n_pair, hidden_size]
-            left_sim = F.cosine_similarity(expanded_source_encs, cand1_encs, dim=-1).view(batch_size, n_pair) # [batch_size, n_pair]
-            right_sim = F.cosine_similarity(expanded_source_encs, cand2_encs, dim=-1).view(batch_size, n_pair) # [batch_size, n_pair]
+            source_cand1_pred_scores = F.cosine_similarity(expanded_source_encs, cand1_encs, dim=-1).view(batch_size, n_pair) # [batch_size, n_pair]
+            source_cand2_pred_scores = F.cosine_similarity(expanded_source_encs, cand2_encs, dim=-1).view(batch_size, n_pair) # [batch_size, n_pair]
             # # compute BCE loss
             loss = torch.tensor(0.0, device=device)
-            loss += F.binary_cross_entropy_with_logits(left_sim, left_labels)
-            loss += F.binary_cross_entropy_with_logits(right_sim, right_labels)
+            loss += F.binary_cross_entropy_with_logits(source_cand1_pred_scores, left_labels)
+            loss += F.binary_cross_entropy_with_logits(source_cand2_pred_scores, right_labels)
             loss /= 2
 
             outputs = {
@@ -1014,11 +1028,11 @@ class DualCompareReranker(nn.Module):
                     to_model_ids, to_model_attention_mask,
                 )
                 # commpute similarity
-                left_sim = F.cosine_similarity(source_encs, cand1_encs, dim=-1) # [batch_size]
-                right_sim = F.cosine_similarity(source_encs, cand2_encs, dim=-1) # [batch_size]
+                source_cand1_pred_scores = F.cosine_similarity(source_encs, cand1_encs, dim=-1) # [batch_size]
+                source_cand2_pred_scores = F.cosine_similarity(source_encs, cand2_encs, dim=-1) # [batch_size]
 
                 # compute accuracy
-                better_idx = torch.where(left_sim >= right_sim, cur_idx, next_idx)
+                better_idx = torch.where(source_cand1_pred_scores >= source_cand2_pred_scores, cur_idx, next_idx)
                 better_idxs.append(better_idx)
                 next_idxs.append(next_idx)
                 cur_idx = better_idx
