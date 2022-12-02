@@ -6,13 +6,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import math
 
 from dualfid.model_moe import MoE
-from dualfid.loss import (
-    ListMLE_loss,
-    ListNet_loss,
-    infoNCE_loss
-)
+from typing import List, Dict, Tuple, Optional, Union
 class ModelMultitaskRegression(nn.Module):
     """
         This class is used to train the model for the multitask regression task.
@@ -212,3 +209,4 @@ class MIDisentangledLayer(nn.Module):
         LOSS += MI
 
         return LOSS, ex_X, ex_Y
+

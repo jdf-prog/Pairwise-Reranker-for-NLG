@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=36:00:00
+#SBATCH --time=24:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --gres=gpu:2080:1
@@ -26,9 +26,9 @@ torchrun \
     --nproc_per_node 1 \
 train_reranker.py \
     --reranker_type "crosscompare" \
-    --model_type "roberta" \
+    --model_type "coberta" \
     --model_name "roberta-large" \
-    --run_name "trian_cnndm_BCE_top_bottom_bottom" \
+    --run_name "trian_cnndm_BCE" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -38,17 +38,17 @@ train_reranker.py \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 16 \
-    --gradient_accumulation_steps 32 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 16 \
     --num_train_epochs 2 \
     --overwrite_output_dir True \
-    --num_pos 2 \
-    --num_neg 2 \
+    --num_pos 1 \
+    --num_neg 1 \
     --loss_type "BCE" \
-    --sub_sampling_mode "top_bottom_random" \
-    --sub_sampling_ratio 0.4 \
-    --max_train_data_size 20000 \
-    --max_eval_data_size -1 \
+    --sub_sampling_mode "top_bottom" \
+    --sub_sampling_ratio 0.1 \
+    --max_train_data_size 25000 \
+    --max_eval_data_size 3000 \
     --max_predict_data_size -1 \
     --using_metrics "rouge1+rouge2+rougeLsum" \
     # --max_grad_norm 100 \

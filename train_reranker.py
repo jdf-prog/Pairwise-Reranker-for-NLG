@@ -260,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
       "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
-      "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint"
+      "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint", "simcls"
     ], default="BCE")
 
     # data config

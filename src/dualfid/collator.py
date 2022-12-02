@@ -195,20 +195,21 @@ class CrossCompareCollator(object):
         batch_candidates = [b['candidates'] for b in batch]
         batch_scores = [b['scores'] for b in batch]
 
-        # TODO: test if this work
-        # batch_candidates = [b['candidates'] + [b['target']] for b in batch] # add target the the candidate list
-        # batch_scores = [torch.cat([s, torch.ones(1, *tuple(s.shape[1:]))], dim=0) for s in batch_scores] # add 1 to the score list
-
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
         n_candidates = len(batch_candidates[0])
 
         batch_candidate_pairs = [[[None for _ in range(n_candidates)] for _ in range(n_candidates)] for _ in range(batch_size)]
+        batch_target_pairs1 = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
+        batch_target_pairs2 = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
         for bz in range(batch_size):
             n_candidates = len(batch_candidates[bz])
             for i in range(n_candidates):
                 for j in range(n_candidates):
                     batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j]])
+                batch_target_pairs1[bz][i] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_target[bz]])
+                batch_target_pairs2[bz][i] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_target[bz], self.candidate2_prefix+batch_candidates[bz][i]])
+
 
         encoded_cand_pair_ids, encoded_cand_pair_masks = [], []
         for bz in range(batch_size):
@@ -218,12 +219,18 @@ class CrossCompareCollator(object):
             encoded_cand_pair_masks.append(mask)
         encoded_cand_pair_ids = torch.stack(encoded_cand_pair_ids, dim=0)
         encoded_cand_pair_masks = torch.stack(encoded_cand_pair_masks, dim=0)
+        encoded_target_pair_ids1, encoded_target_pair_masks1 = encode_batch_text(batch_target_pairs1, self.tokenizer, self.max_length)
+        encoded_target_pair_ids2, encoded_target_pair_masks2 = encode_batch_text(batch_target_pairs2, self.tokenizer, self.max_length)
+        encoded_target_pair_ids = torch.stack([encoded_target_pair_ids1, encoded_target_pair_ids2], dim=1)
+        encoded_target_pair_masks = torch.stack([encoded_target_pair_masks1, encoded_target_pair_masks2], dim=1)
 
         scores = torch.tensor(batch_scores)
         return {
             "candidate_pair_ids" : encoded_cand_pair_ids,
             "candidate_pair_attention_mask" : encoded_cand_pair_masks,
             "scores" : scores,
+            "target_pair_ids" : encoded_target_pair_ids,
+            "target_pair_attention_mask" : encoded_target_pair_masks,
         }
 
 class CurriculumCrossCompareCollator(object):

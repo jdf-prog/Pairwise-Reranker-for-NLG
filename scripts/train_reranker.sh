@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
 #SBATCH --gres=gpu:2080:1
@@ -129,7 +129,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "debug_ranknet" \
+    --run_name "debug" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -140,18 +140,18 @@ train_reranker.py \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 16 \
+    --gradient_accumulation_steps 32 \
     --num_train_epochs 2 \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \
-    --loss_type "ranknet" \
-    --sub_sampling_mode "uniform" \
+    --loss_type "simcls" \
+    --sub_sampling_mode "top_bottom" \
     --sub_sampling_ratio 0.1 \
     --evaluation_strategy "steps" \
     --save_strategy "steps" \
-    --eval_steps 200 \
-    --save_steps 200 \
+    --eval_steps 100 \
+    --save_steps 100 \
     # --max_grad_norm 100.0 \
     # --lr_scheduler_type "cosine" \
     # --save_total_limit 10 \

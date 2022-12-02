@@ -27,14 +27,7 @@ from dualfid.loss import (
 )
 from copy import deepcopy
 import transformers.trainer
-from torch.nn import (
-    MSELoss,
-    BCEWithLogitsLoss,
-    CrossEntropyLoss,
-)
-from transformers.modeling_outputs import (
-    SequenceClassifierOutput
-)
+
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -418,7 +411,6 @@ class CrossCompareReranker(nn.Module):
         self.pretrained_model = pretrained_model
         self.hidden_size = pretrained_model.config.hidden_size
         self.sep_token_id = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
-
         self.tokenizer = tokenizer
 
         self.head_layer = nn.Sequential(
@@ -440,7 +432,6 @@ class CrossCompareReranker(nn.Module):
         # towers - one for each task
         self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
         self.sigmoid = nn.Sigmoid()
-
 
         # parameters for dynamic epochs
         self.args['training_steps'] = self.args.get('training_steps', 0)
@@ -513,6 +504,13 @@ class CrossCompareReranker(nn.Module):
             scores = torch.cat([left_scores, right_scores], dim=0).transpose(0, 1)
             cls_loss = ranknet_loss(preds_scores, scores)
             preds = source_cand1_pred_scores - source_cand2_pred_scores
+        elif self.loss_type == "simcls":
+            pred_dif_scores = source_cand1_pred_scores - source_cand2_pred_scores
+            dif_scores = (left_scores - right_scores)
+            dif_sign = torch.sign(dif_scores)
+            pred_dif_scores = pred_dif_scores * dif_sign
+            dif_scores = torch.abs(dif_scores)
+            cls_loss = torch.where(pred_dif_scores > dif_scores, torch.zeros_like(pred_dif_scores), dif_scores - pred_dif_scores).mean()
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += cls_loss
@@ -685,6 +683,8 @@ class CrossCompareReranker(nn.Module):
         candidate_pair_ids,
         candidate_pair_attention_mask,
         scores,
+        target_pair_ids=None,
+        target_pair_attention_mask=None,
     ):
         """
             Compute scores for each candidate
@@ -693,6 +693,8 @@ class CrossCompareReranker(nn.Module):
                 candidate_pair_ids: [batch_size, n_candidates, n_candidates, candidate_len]
                 candidate_pair_attention_mask: [batch_size, n_candidates, n_candidates, candidate_len]
                 scores: [batch_size, n_candidates, n_tasks]
+                target_pair_ids: [batch_size, 2, n_candidates, candidate_len]
+                target_pair_attention_mask: [batch_size, 2, n_candidates, candidate_len]
             passing in as individual:
                 candidate_pair_ids: [batch_size, candidate_len]
                 candidate_pair_attention_mask: [batch_size, candidate_len]
@@ -722,17 +724,31 @@ class CrossCompareReranker(nn.Module):
 
                 left_idx, right_idx = self.sampling(scores.mean(-1))
                 batch_idx = torch.arange(batch_size).unsqueeze(1)
-
+                ranks = torch.argsort(scores.transpose(1, 2), dim=-1).transpose(1,2)
+                scores = ranks.type(torch.float).to(device) + 1 # debug
                 candidate_pair_ids = candidate_pair_ids[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
                 candidate_pair_attention_mask = candidate_pair_attention_mask[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
-                left_scores = scores[batch_idx, left_idx]
-                right_scores = scores[batch_idx, right_idx]
                 outputs = self._forward(
                     candidate_pair_ids,
                     candidate_pair_attention_mask,
-                    left_scores,
-                    right_scores,
+                    scores[batch_idx, left_idx],
+                    scores[batch_idx, right_idx]
                 )
+                # add targets to outputs
+                n_pair = left_idx.shape[1]
+                shuffle_idx = torch.rand(batch_size, n_pair, device=device) < 0.5
+                pair_idx = torch.where(shuffle_idx, left_idx, right_idx)
+                forward_target_pair_ids = torch.where(shuffle_idx.unsqueeze(-1), target_pair_ids[batch_idx, 0, pair_idx], target_pair_ids[batch_idx, 1, pair_idx])
+                forward_target_pair_attention_mask = torch.where(shuffle_idx.unsqueeze(-1), target_pair_attention_mask[batch_idx, 0, pair_idx], target_pair_attention_mask[batch_idx, 1, pair_idx])
+                left_scores = torch.where(shuffle_idx, torch.zeros_like(scores[batch_idx, pair_idx]), torch.ones_like(scores[batch_idx, pair_idx]))
+                right_scores = torch.where(shuffle_idx, torch.ones_like(scores[batch_idx, pair_idx]), torch.zeros_like(scores[batch_idx, pair_idx]))
+                target_outputs = self._forward(
+                    forward_target_pair_ids,
+                    forward_target_pair_attention_mask,
+                    left_scores,
+                    right_scores
+                )
+                outputs['loss'] += target_outputs['loss']
 
             else:
                 batch_size, n_candidates, _, candidate_len = candidate_pair_ids.shape
