@@ -161,11 +161,13 @@ def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, flo
         "sel": {"acc": np.mean(accs)},
         "oracle": {},
         "top_beam": {},
+        "gain": {},
     }
     for i in range(n_tasks):
         metrics["sel"]["metric_{}".format(i+1)] = np.mean(pred_best_scores[:, i])
         metrics["oracle"]["metric_{}".format(i+1)] = np.mean(oracle_best_scores[:, i])
         metrics["top_beam"]["metric_{}".format(i+1)] = np.mean(scores[:, 0, i])
+        metrics["gain"]["metric_{}".format(i+1)] = metrics["sel"]["metric_{}".format(i+1)] / metrics["top_beam"]["metric_{}".format(i+1)] - 1
     metrics['dev_score'] = metrics['sel']['metric_1']
 
     num_consistency = np.sum(ranks_consistency_dist[:,:,0], dtype=np.int32).item()

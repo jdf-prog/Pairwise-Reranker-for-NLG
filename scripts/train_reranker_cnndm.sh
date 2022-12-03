@@ -26,9 +26,9 @@ torchrun \
     --nproc_per_node 1 \
 train_reranker.py \
     --reranker_type "crosscompare" \
-    --model_type "coberta" \
+    --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "trian_cnndm_BCE" \
+    --run_name "trian_cnndm_BCE_debug_" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -48,9 +48,13 @@ train_reranker.py \
     --sub_sampling_mode "top_bottom" \
     --sub_sampling_ratio 0.1 \
     --max_train_data_size 25000 \
-    --max_eval_data_size 3000 \
+    --max_eval_data_size 1000 \
     --max_predict_data_size -1 \
     --using_metrics "rouge1+rouge2+rougeLsum" \
+    --evaluation_strategy "steps" \
+    --save_strategy "steps" \
+    --eval_steps 100 \
+    --save_steps 100 \
     # --max_grad_norm 100 \
     # --max_grad_norm 100.0 \
     # --do_train False \
@@ -58,10 +62,6 @@ train_reranker.py \
     # --do_predict True \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm_curriculum_error-based_MSE/checkpoint-best" \
     # --evaluate_before_training True \
-    # --evaluation_strategy "steps" \
-    # --save_strategy "steps" \
-    # --eval_steps 100 \
-    # --save_steps 100 \
     # --evaluate_before_training True \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
 

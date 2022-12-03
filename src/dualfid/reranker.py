@@ -506,6 +506,7 @@ class CrossCompareReranker(nn.Module):
             preds = source_cand1_pred_scores - source_cand2_pred_scores
         elif self.loss_type == "simcls":
             pred_dif_scores = source_cand1_pred_scores - source_cand2_pred_scores
+            pred_dif_scores = self.sigmoid(pred_dif_scores)
             dif_scores = (left_scores - right_scores)
             dif_sign = torch.sign(dif_scores)
             pred_dif_scores = pred_dif_scores * dif_sign
@@ -610,27 +611,38 @@ class CrossCompareReranker(nn.Module):
         n_pair = min(self.num_pos, self.num_neg)
         device = scores.device
 
-        sorted_idx = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates]
+        # remove duplicate candidates
+        idx = torch.arange(n_candidates, device=device).view(1, -1).expand(batch_size, -1)
+        unique_idx = []
+        unique_scores = []
+        for i in range(batch_size):
+            _scores = torch.unique(scores[i])
+            _idx = []
+            for _score in _scores:
+                _idx.append(idx[i][scores[i] == _score][0])
+            _idx = torch.tensor(_idx, device=device)
+            _idx = _idx[torch.randperm(len(_idx), device=device)]
+            _scores = scores[i][_idx]
+            assert len(_scores) == torch.unique(_scores).shape[0]
+            unique_idx.append(_idx)
+            unique_scores.append(_scores)
+        min_uni_cand_len = min([len(_idx) for _idx in unique_idx])
+        unique_idx = [idx[:min_uni_cand_len] for idx in unique_idx]
+        unique_scores = [scores[:min_uni_cand_len] for scores in unique_scores]
+        unique_idx = torch.stack(unique_idx, dim=0)
+        unique_scores = torch.stack(unique_scores, dim=0)
+        n_candidates = min_uni_cand_len
+        sorted_idx = torch.argsort(unique_scores, dim=1, descending=True) # [batch_size, n_candidates]
+
         # NOTE: different sampling strategy
         if self.sub_sampling_mode == "top_bottom":
-            # 1. top bottom sampling
-            # self.args['training_steps'] += batch_size
-            # cur_stage = self.args['training_steps'] // (self.args['training_data_size'] // self.args['n_candidates'] * 2)
-            # dif_rank = n_candidates - cur_stage
-            # rand_int = random.randint(0, cur_stage)
-            # sub_sorted_idx = sorted_idx[:, rand_int:rand_int+dif_rank]
-            # pos_idx = sub_sorted_idx[:, :n_pair]
-            # neg_idx = sub_sorted_idx[:, -n_pair:]
             pos_idx = sorted_idx[:, :n_pair]
             neg_idx = sorted_idx[:, -n_pair:]
         elif self.sub_sampling_mode == "top_bottom_random":
-            top_bottom_n_pair = (n_pair + 1) // 2
-            random_n_pair = n_pair - top_bottom_n_pair
-            pos_idx = sorted_idx[:, :top_bottom_n_pair]
-            neg_idx = sorted_idx[:, -top_bottom_n_pair:]
-            pos_idx = torch.cat([pos_idx, torch.randint(top_bottom_n_pair, n_candidates - top_bottom_n_pair, (batch_size, random_n_pair), device=device)], dim=1)
-            neg_idx = torch.cat([neg_idx, torch.randint(top_bottom_n_pair, n_candidates - top_bottom_n_pair, (batch_size, random_n_pair), device=device)], dim=1)
-
+            pos_idx = sorted_idx[:, :n_pair]
+            neg_idx = sorted_idx[:, -n_pair:]
+            random_idx = torch.stack([torch.randperm(pos_idx.shape[1]) for _ in range(batch_size)], dim=0).to(device)
+            pos_idx = pos_idx[torch.arange(batch_size).view(-1, 1), random_idx]
         elif self.sub_sampling_mode == "random":
             # 2. random sampling
             n_pair = int(n_candidates * self.sub_sampling_ratio)
@@ -642,40 +654,17 @@ class CrossCompareReranker(nn.Module):
             pos_idx = sorted_idx[:, 0:-step:step]
             neg_idx = sorted_idx[:, step::step]
             n_pair = pos_idx.shape[1]
-        elif self.sub_sampling_mode == "poisson_dynamic":
-            # 2. using rank dif as difficulty measure function
-            self.args['training_steps'] += batch_size
-            if self.args['training_steps'] > self.args['training_data_size']:
-                self.args['training_steps'] = 0
-            poisson_rate_update_steps = self.args['training_data_size'] // self.args['n_candidates']
-            poisson_rate = self.args['training_steps'] // poisson_rate_update_steps + 1
-            poisson_rate = max(poisson_rate, 1)
-            # print(poisson_rate_update_steps) # debug
-            # print(f"poisson_rate: {poisson_rate}") # debug
-            poisson_sampling_dif_ranks = torch.clip(
-                torch.poisson(torch.ones(batch_size, n_pair) * poisson_rate), 1, self.args['n_candidates'] - 1
-            ).type(torch.int64).to(device)
-            poisson_sampling_dif_ranks = self.args['n_candidates'] - 1 - poisson_sampling_dif_ranks
-            # print(f"poisson_sampling_dif_ranks: {poisson_sampling_dif_ranks}") # debug
-            pos_idx = torch.tensor([
-                [random.randint(0, self.args['n_candidates'] - 1 - poisson_sampling_dif_ranks[i,j].item())
-                    for j in range(n_pair)] for i in range(batch_size)
-            ]).type(torch.int64).to(device)
-            neg_idx = pos_idx + poisson_sampling_dif_ranks
-            # print(f"pos_idx: {pos_idx}") # debug
-            # print(f"neg_idx: {neg_idx}") # debug
-            # print(f"sorted_idx: {sorted_idx}") # debug
-            pos_idx = sorted_idx.gather(1, pos_idx)
-            neg_idx = sorted_idx.gather(1, neg_idx)
-            # print(f"pos_idx: {pos_idx}") # debug
-            # print(f"neg_idx: {neg_idx}") # debug
-            # TODO: select unique pairs
         else:
             raise ValueError(f"Unknown sampling mode: {self.sub_sampling_mode}")
 
         shuffle_flag = torch.rand(batch_size, n_pair, device=device) < 0.5
         left_idx = torch.where(shuffle_flag, neg_idx, pos_idx)
         right_idx = torch.where(shuffle_flag, pos_idx, neg_idx)
+
+        # get the origianl unique_idx
+        left_idx = unique_idx.gather(1, left_idx)
+        right_idx = unique_idx.gather(1, right_idx)
+
         return left_idx, right_idx
 
     def forward(
@@ -724,8 +713,11 @@ class CrossCompareReranker(nn.Module):
 
                 left_idx, right_idx = self.sampling(scores.mean(-1))
                 batch_idx = torch.arange(batch_size).unsqueeze(1)
-                ranks = torch.argsort(scores.transpose(1, 2), dim=-1).transpose(1,2)
-                scores = ranks.type(torch.float).to(device) + 1 # debug
+                sorted_idx = torch.argsort(scores, dim=1)
+                ranks = torch.arange(n_candidates).view(1, -1, 1).expand_as(scores).to(device)
+                ranks = ranks.scatter(1, sorted_idx, ranks)
+                ranks = (ranks.type(torch.float32) + 1) / n_candidates
+                scores = ranks
                 candidate_pair_ids = candidate_pair_ids[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
                 candidate_pair_attention_mask = candidate_pair_attention_mask[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
                 outputs = self._forward(
@@ -740,8 +732,8 @@ class CrossCompareReranker(nn.Module):
                 pair_idx = torch.where(shuffle_idx, left_idx, right_idx)
                 forward_target_pair_ids = torch.where(shuffle_idx.unsqueeze(-1), target_pair_ids[batch_idx, 0, pair_idx], target_pair_ids[batch_idx, 1, pair_idx])
                 forward_target_pair_attention_mask = torch.where(shuffle_idx.unsqueeze(-1), target_pair_attention_mask[batch_idx, 0, pair_idx], target_pair_attention_mask[batch_idx, 1, pair_idx])
-                left_scores = torch.where(shuffle_idx, torch.zeros_like(scores[batch_idx, pair_idx]), torch.ones_like(scores[batch_idx, pair_idx]))
-                right_scores = torch.where(shuffle_idx, torch.ones_like(scores[batch_idx, pair_idx]), torch.zeros_like(scores[batch_idx, pair_idx]))
+                left_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.zeros_like(scores[batch_idx, pair_idx]), torch.ones_like(scores[batch_idx, pair_idx]))
+                right_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.ones_like(scores[batch_idx, pair_idx]), torch.zeros_like(scores[batch_idx, pair_idx]))
                 target_outputs = self._forward(
                     forward_target_pair_ids,
                     forward_target_pair_attention_mask,
