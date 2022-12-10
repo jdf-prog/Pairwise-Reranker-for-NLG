@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:2080:1
 #SBATCH -n 1
 
+nvidia-smi
 ######################################################
 # Generate candidates using public fine-tuned models
 ######################################################
@@ -60,46 +61,18 @@
 # wmt18
 ######################################################
 
-# for set in "train" "val" "test"
-# do
-#     for method in "beam_search" "diverse_beam_search"
-#     do
-#         python generate_candidate.py \
-#         --dataset wmt18 \
-#         --model_type opus-mt \
-#         --model Helsinki-NLP/opus-mt-zh-en \
-#         --model_name opus_mt \
-#         --load_model False \
-#         --set ${set} \
-#         --inference_bs 15 \
-#         --save_candidates True \
-#         --generation_method ${method} \
-#         --num_return_sequences 15 \
-#         --num_beams 15 \
-#         --num_beam_groups 15
-
-#     done
-# done
-
-######################################################
-# commongen
-######################################################
-
-# commongen
-for set in "test" "val"
+for set in "val" "test"
 do
-    for method in "diverse_beam_search" "beam_search"
+    for method in "top_k_sampling" "top_p_sampling"
     do
-
         python generate_candidate.py \
-        --dataset commongen \
-        --model_type t5 \
-        --model t5-large \
-        --model_name t5_common_gen \
-        --load_model True \
-        --load_model_path "../../models/t5_common_gen/checkpoint-best" \
+        --dataset wmt18 \
+        --model_type opus-mt \
+        --model Helsinki-NLP/opus-mt-zh-en \
+        --model_name opus_mt \
+        --load_model False \
         --set ${set} \
-        --inference_bs 10 \
+        --inference_bs 15 \
         --save_candidates True \
         --generation_method ${method} \
         --num_return_sequences 15 \
@@ -108,6 +81,34 @@ do
 
     done
 done
+
+######################################################
+# commongen
+######################################################
+
+# # commongen
+# for set in "val" "test"
+# do
+#     for method in "top_k_sampling"
+#     do
+
+#         python generate_candidate.py \
+#         --dataset commongen \
+#         --model_type t5 \
+#         --model t5-large \
+#         --model_name t5_common_gen \
+#         --load_model True \
+#         --load_model_path "../../models/t5_common_gen/checkpoint-best" \
+#         --set ${set} \
+#         --inference_bs 10 \
+#         --save_candidates True \
+#         --generation_method ${method} \
+#         --num_return_sequences 15 \
+#         --num_beams 15 \
+#         --num_beam_groups 15
+
+#     done
+# done
 
 #######################################################
 # Generate candidates using our half-fine-tuned models
@@ -122,7 +123,7 @@ done
 # with model trained on 1-half of the training data
 ######################################################
 
-# for method in "diverse_beam_search" "beam_search"
+# for method in "top_k_sampling" "top_p_sampling"
 # do
 #     python generate_candidate.py \
 #     --dataset commongen \

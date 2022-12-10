@@ -101,6 +101,8 @@ def main(args):
         "new_num_tokens": len(tokenizer),
         "training_data_size": len(train_dataset) if train_dataset else 0,
         "n_candidates": args.n_candidates,
+        "pooling_type": args.pooling_type,
+        "reduce_type": args.reduce_type,
     }
     if args.load_checkpoint:
         # config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
@@ -262,6 +264,12 @@ if __name__ == "__main__":
       "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
       "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint", "simcls"
     ], default="BCE")
+    parser.add_argument("--pooling_type", type=str, choices=[
+        "special", "mean", "attention"
+    ], default="special")
+    parser.add_argument("--reduce_type", type=str, choices=[
+        "moe", "cosine", "linear", "single_linear", "single_moe"
+    ], default="single_linear")
 
     # data config
     parser.add_argument("--n_candidates", type=int, default=-1)
@@ -274,7 +282,7 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance", "random", "poisson_dynamic", "top_bottom_random"
+        "importance", "random", "poisson_dynamic", "top_bottom_random", "custom"
     ], default="top_bottom")
     parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)
@@ -338,7 +346,7 @@ if __name__ == "__main__":
         "steps", "epoch", "no"
     ], default="epoch")
     parser.add_argument("--save_steps", type=int, default=0)
-    parser.add_argument("--save_total_limit", type=int, default=10)
+    parser.add_argument("--save_total_limit", type=int, default=4)
 
     # metrics config
     parser.add_argument("--load_best_model_at_end", type=str2bool, default=True)

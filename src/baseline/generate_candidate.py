@@ -160,6 +160,11 @@ def main(args):
         # add offsets for saving
         args.start_idx += offsets[0]
         args.end_idx += offsets[0]
+    elif args.partition in ['1_half', '2_half']:
+        print("Using start_idx: {}, end_idx: {}".format(offsets[0], offsets[1]))
+        args.start_idx = offsets[0]
+        args.end_idx = offsets[1]
+
     print("Idxs used for saving: {} - {}".format(args.start_idx, args.end_idx))
 
     print("Cutting data to {} below samples".format(args.max_val_size))

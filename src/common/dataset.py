@@ -321,7 +321,7 @@ class CustomDataset:
                 mean_score = np.mean(mean_scores[metric])
                 max_score = np.mean(max_scores[metric])
                 min_score = np.mean(min_scores[metric])
-                row.append(f"{top_beam_score:.3f} ({min_score:.3f} - {mean_score:.3f} - {max_score:.3f})")
+                row.append(f"{top_beam_score:.4f} ({min_score:.4f} - {mean_score:.4f} - {max_score:.4f})")
             rows.append(row)
 
         # 2. add oracle performances to the table for each model using all generation methods
@@ -351,7 +351,7 @@ class CustomDataset:
                 mean_score = np.mean(mean_scores[metric])
                 max_score = np.mean(max_scores[metric])
                 min_score = np.mean(min_scores[metric])
-                row.append(f"{top_beam_score:.3f} ({min_score:.3f} - {mean_score:.3f} - {max_score:.3f})")
+                row.append(f"{top_beam_score:.4f} ({min_score:.4f} - {mean_score:.4f} - {max_score:.4f})")
             rows.append(row)
 
         rows.sort(key=lambda x: x[0])

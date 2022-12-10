@@ -83,13 +83,6 @@ class SCR(nn.Module):
                 nn.Dropout(self.drop_out),
                 nn.Linear(2 * self.hidden_size, self.n_tasks),
             )
-            # self.regression_layer = nn.Sequential(
-            #     nn.Dropout(self.drop_out),
-            #     nn.Linear(self.hidden_size, self.hidden_size),
-            #     nn.Tanh(),
-            #     nn.Dropout(self.drop_out),
-            #     nn.Linear(self.hidden_size, self.n_tasks),
-            # )
 
     def _forawrd(self, input_ids, attention_mask):
         """
@@ -406,6 +399,8 @@ class CrossCompareReranker(nn.Module):
         self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.loss_type = self.args["loss_type"]
         self.drop_out = self.args.get("drop_out", 0.05)
+        self.pooling_type = self.args.get("pooling", "special")
+        self.reduce_type = self.args.get("reduce", "single_linear")
 
         # LM
         self.pretrained_model = pretrained_model
@@ -420,92 +415,78 @@ class CrossCompareReranker(nn.Module):
             nn.Dropout(self.drop_out),
             nn.Linear(1 * self.hidden_size, self.n_tasks),
         )
+        self.single_head_layer = nn.Sequential(
+            nn.Dropout(self.drop_out),
+            nn.Linear(1*self.hidden_size, 1*self.hidden_size),
+            nn.Tanh(),
+            nn.Dropout(self.drop_out),
+            nn.Linear(1 * self.hidden_size, self.n_tasks),
+        )
+        self.single_moe_bottom = nn.Sequential(
+            nn.Linear(1*self.hidden_size, 1*self.hidden_size),
+            nn.Tanh(),
+            nn.Linear(1*self.hidden_size, 1*self.hidden_size),
+        )
 
         # for MOE
         self.bottom_hidden_size = self.hidden_size
         # shared bottom
         self.fc1 = nn.Linear(2*self.hidden_size, self.bottom_hidden_size)
-        self.relu = nn.ReLU()
+        self.tanh = nn.Tanh()
         self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
         # MoE
         self.moe = MoE(self.n_tasks, self.hidden_size, self.hidden_size, 2*self.n_tasks, self.hidden_size, k=self.n_tasks)
         # towers - one for each task
         self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
         self.sigmoid = nn.Sigmoid()
+        from transformers.models.roberta.modeling_roberta import RobertaLayer
+        self.attention = RobertaLayer(pretrained_model.config)
 
         # parameters for dynamic epochs
         self.args['training_steps'] = self.args.get('training_steps', 0)
         self.args['training_data_size'] = self.args.get('training_data_size', 0)
         self.args['n_candidates'] = self.args.get('n_candidates', -1)
 
-    def compute_loss(self, source_encs, cand1_encs, cand2_encs, left_scores, right_scores, reduce="linear"):
+    def compute_loss(self, left_pred_scores, right_pred_scores, left_scores, right_scores):
         """
         Args:
-            source_encs: [batch_size, hidden_size]
-            cand1_encs: [batch_size, hidden_size]
-            cand2_encs: [batch_size, hidden_size]
-            left_scores: [batch_size, n_task]
-            right_scores: [batch_size, n_task]
+            left_pred_scores: [n_candidates, hidden_size]
+            right_pred_scores: [n_candidates, hidden_size]
+            left_scores: [n_candidates, n_task]
+            right_scores: [n_candidates, n_task]
         """
 
-        device = source_encs.device
-        loss = torch.tensor(0.0).to(source_encs.device)
-        assert reduce in ["moe", "cosine", "linear"]
-        if reduce == "moe":
-            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
-            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
-            # MOE
-            source_cand1_encs = self.fc2(self.relu(self.fc1(source_cand1_encs)))
-            source_cand2_encs = self.fc2(self.relu(self.fc1(source_cand2_encs)))
-            source_cand1_preds, cand1_aux_loss = self.moe(source_cand1_encs, train=self.training, collect_gates=not (self.training))
-            source_cand2_preds, cand2_aux_loss = self.moe(source_cand2_encs, train=self.training, collect_gates=not (self.training))
-            # go to towers for different tasks
-            source_cand1_pred_scores = torch.cat([
-                tower(source_cand1_pred) for source_cand1_pred, tower in zip(source_cand1_preds, self.towers)
-            ], dim=-1)
-            source_cand2_pred_scores = torch.cat([
-                tower(source_cand2_pred) for source_cand2_pred, tower in zip(source_cand2_preds, self.towers)
-            ], dim=-1)
-        elif reduce == "cosine":
-            source_cand1_pred_scores = torch.cosine_similarity(source_encs, cand1_encs, dim=-1)
-            source_cand2_pred_scores = torch.cosine_similarity(source_encs, cand2_encs, dim=-1)
-        elif reduce == "linear":
-            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
-            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
-            source_cand1_pred_scores = self.head_layer(source_cand1_encs)
-            source_cand2_pred_scores = self.head_layer(source_cand2_encs)
-        else:
-            raise NotImplementedError
+        device = left_pred_scores.device
+        loss = torch.tensor(0.0).to(left_pred_scores.device)
 
         if self.loss_type == "triplet":
             dif_scores = (left_scores - right_scores)
             dif_scores_sign = torch.sign(dif_scores)
             cls_loss = torch.max(torch.zeros_like(preds), torch.abs(dif_scores) - dif_scores_sign * preds).mean()
             # add MSE loss
-            mse_loss = F.mse_loss(source_cand1_pred_scores, left_scores)
-            mse_loss += F.mse_loss(source_cand2_pred_scores, right_scores)
+            mse_loss = F.mse_loss(left_pred_scores, left_scores)
+            mse_loss += F.mse_loss(right_pred_scores, right_scores)
             cls_loss += mse_loss
         elif self.loss_type == "BCE":
             dif_scores = (left_scores - right_scores)
             left_labels = (dif_scores > 0).float()
             right_labels = (dif_scores < 0).float()
             cls_loss = torch.tensor(0.0, device=device)
-            cls_loss += F.binary_cross_entropy_with_logits(source_cand1_pred_scores, left_labels)
-            cls_loss += F.binary_cross_entropy_with_logits(source_cand2_pred_scores, right_labels)
+            cls_loss += F.binary_cross_entropy_with_logits(left_pred_scores, left_labels)
+            cls_loss += F.binary_cross_entropy_with_logits(right_pred_scores, right_labels)
             cls_loss /= 2
         elif self.loss_type == "MSE":
             cls_loss = torch.tensor(0.0, device=device)
-            cls_loss += F.mse_loss(source_cand1_pred_scores, left_scores)
-            cls_loss += F.mse_loss(source_cand2_pred_scores, right_scores)
-            cls_loss -= (2 * (source_cand1_pred_scores - source_cand2_pred_scores) * (left_scores - right_scores)).mean()
-            cls_loss += cand1_aux_loss + cand2_aux_loss
+            cls_loss += F.mse_loss(left_pred_scores, left_scores)
+            cls_loss += F.mse_loss(right_pred_scores, right_scores)
+            cls_loss -= (2 * (left_pred_scores - right_pred_scores) * (left_scores - right_scores)).mean()
         elif self.loss_type == "ranknet":
-            preds_scores = torch.cat([source_cand1_pred_scores, source_cand2_pred_scores], dim=0).transpose(0, 1)
+            preds_scores = torch.cat([left_pred_scores, right_pred_scores], dim=0).transpose(0, 1)
             scores = torch.cat([left_scores, right_scores], dim=0).transpose(0, 1)
             cls_loss = ranknet_loss(preds_scores, scores)
-            preds = source_cand1_pred_scores - source_cand2_pred_scores
+            preds = left_pred_scores - right_pred_scores
         elif self.loss_type == "simcls":
-            pred_dif_scores = source_cand1_pred_scores - source_cand2_pred_scores
+            pred_dif_scores = left_pred_scores - right_pred_scores
             pred_dif_scores = self.sigmoid(pred_dif_scores)
             dif_scores = (left_scores - right_scores)
             dif_sign = torch.sign(dif_scores)
@@ -515,53 +496,28 @@ class CrossCompareReranker(nn.Module):
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += cls_loss
-        preds = source_cand1_pred_scores - source_cand2_pred_scores
-        if preds.dim() == 2:
-            preds = preds.mean(-1)
-        return loss, preds
+        return loss
 
-    def _forward(
-        self,
-        input_ids,
-        attention_mask,
-        left_scores,
-        right_scores,
-        reduce="special"
-    ):
+    def pooling(self, encs, input_ids, attention_mask):
         """
-            Compute scores for each candidate pairs
         Args:
-            input_ids: [*, seq_len]
-            attention_mask: [*, seq_len]
-            left_scores: [*, n_task]
-            right_scores: [*, n_task]
+            encs: [batch_size, seq_len, hidden_size]
+            input_ids: [batch_size, seq_len]
+            attention_mask: [batch_size, seq_len]
         Returns:
-            pred_probs: [*]
+            source_encs: [batch_size, hidden_size]
+            cand1_encs: [batch_size, hidden_size]
+            cand2_encs: [batch_size, hidden_size]
         """
-        device = input_ids.device
-        original_shape = input_ids.shape[:-1]
-        seq_len = input_ids.shape[-1]
-        n_task = left_scores.shape[-1]
-        input_ids = input_ids.view(-1, seq_len)
-        attention_mask = attention_mask.view(-1, seq_len)
-        left_scores = left_scores.view(-1, n_task)
-        right_scores = right_scores.view(-1, n_task)
-        outputs = self.pretrained_model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            output_hidden_states=True,
-        )
         sep_token_idx = input_ids.eq(self.sep_token_id)
         assert sep_token_idx.sum(-1).eq(3).all(), sep_token_idx.sum(-1)
         sep_token_idx = sep_token_idx.nonzero()[:, 1].reshape(-1, 3)
-        encs = outputs.last_hidden_state
-        # get the special token <source> and <candidate>
-        loss = torch.tensor(0.0, device=device)
-        if reduce=="special":
+        pooling_type = self.pooling_type
+        if pooling_type=="special":
             source_encs = encs[:, 1, :]
             cand1_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 0]+1, :]
             cand2_encs = encs[torch.arange(encs.shape[0]), sep_token_idx[:, 1]+1, :]
-        elif reduce=="mean":
+        elif pooling_type=="mean":
             source_encs = []
             cand1_encs = []
             cand2_encs = []
@@ -572,31 +528,157 @@ class CrossCompareReranker(nn.Module):
             source_encs = torch.stack(source_encs, dim=0)
             cand1_encs = torch.stack(cand1_encs, dim=0)
             cand2_encs = torch.stack(cand2_encs, dim=0)
+        elif pooling_type=="attention":
+            source_encs = []
+            cand1_encs = []
+            cand2_encs = []
+            for i in range(encs.shape[0]):
+                _source_encs = encs[i, 0:sep_token_idx[i, 0], :]
+                _cand1_encs = encs[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1], :]
+                _cand2_encs = encs[i, sep_token_idx[i, 1]+1:sep_token_idx[i, 2], :]
+                _source_mask = attention_mask[i, 0:sep_token_idx[i, 0]]
+                _cand1_mask = attention_mask[i, sep_token_idx[i, 0]+1:sep_token_idx[i, 1]]
+                _cand2_mask = attention_mask[i, sep_token_idx[i, 1]+1:sep_token_idx[i, 2]]
+                _source_cand1_att_encs = self.attention(
+                    hidden_states=torch.cat([_source_encs, _cand1_encs], dim=0).unsqueeze(0),
+                    attention_mask=torch.cat([_source_mask, _cand1_mask], dim=0).unsqueeze(0),
+                )[0]
+                _source_cand2_att_encs = self.attention(
+                    hidden_states=torch.cat([_source_encs, _cand2_encs], dim=0).unsqueeze(0),
+                    attention_mask=torch.cat([_source_mask, _cand2_mask], dim=0).unsqueeze(0),
+                )[0]
+                _cand1_encs = _source_cand1_att_encs[0, 0, :]
+                _cand2_encs = _source_cand2_att_encs[0, 0, :]
+                source_encs.append(torch.mean(encs[i, 1:sep_token_idx[i, 0], :], dim=0))
+                cand1_encs.append(_cand1_encs)
+                cand2_encs.append(_cand2_encs)
+            source_encs = torch.stack(source_encs, dim=0)
+            cand1_encs = torch.stack(cand1_encs, dim=0)
+            cand2_encs = torch.stack(cand2_encs, dim=0)
         else:
-            raise ValueError(f"Unknown reduce type: {reduce}")
+            raise ValueError(f"Unknown pooling type: {pooling_type}")
+        return source_encs, cand1_encs, cand2_encs
 
-        if len(original_shape) == 2:
-            loss = torch.tensor(0.0, device=device)
-            pred_probs = []
-            batch_size, n_candidates = original_shape
-            source_encs = source_encs.view(batch_size, n_candidates, -1)
-            cand1_encs = cand1_encs.view(batch_size, n_candidates, -1)
-            cand2_encs = cand2_encs.view(batch_size, n_candidates, -1)
-            left_scores = left_scores.view(batch_size, n_candidates, -1)
-            right_scores = right_scores.view(batch_size, n_candidates, -1)
-            for i in range(batch_size):
-                _loss, _pred_probs = self.compute_loss(source_encs[i], cand1_encs[i], cand2_encs[i], left_scores[i], right_scores[i])
-                loss += _loss
-                pred_probs.append(_pred_probs)
-            loss /= batch_size
-            pred_probs = torch.cat(pred_probs, dim=0)
+    def reduce(self, source_encs, cand1_encs, cand2_encs):
+        """
+        Args:
+            source_encs: [batch_size, hidden_size]
+            cand1_encs: [batch_size, hidden_size]
+            cand2_encs: [batch_size, hidden_size]
+        Returns:
+            left_pred_scores: [batch_size, n_task]
+            right_pred_scores: [batch_size, n_task]
+        """
+        # reduce
+        aux_loss = torch.tensor(0.0, device=source_encs.device)
+        reduce_type = self.reduce_type
+        if reduce_type == "moe":
+            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
+            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
+            # MOE
+            source_cand1_encs = self.fc2(self.tanh(self.fc1(source_cand1_encs)))
+            source_cand2_encs = self.fc2(self.tanh(self.fc1(source_cand2_encs)))
+            source_cand1_preds, cand1_aux_loss = self.moe(source_cand1_encs, train=self.training, collect_gates=not (self.training))
+            source_cand2_preds, cand2_aux_loss = self.moe(source_cand2_encs, train=self.training, collect_gates=not (self.training))
+            aux_loss += cand1_aux_loss + cand2_aux_loss
+            # go to towers for different tasks
+            left_pred_scores = torch.cat([
+                tower(source_cand1_pred) for source_cand1_pred, tower in zip(source_cand1_preds, self.towers)
+            ], dim=-1)
+            right_pred_scores = torch.cat([
+                tower(source_cand2_pred) for source_cand2_pred, tower in zip(source_cand2_preds, self.towers)
+            ], dim=-1)
+        elif reduce_type == "cosine":
+            left_pred_scores = torch.cosine_similarity(source_encs, cand1_encs, dim=-1)
+            right_pred_scores = torch.cosine_similarity(source_encs, cand2_encs, dim=-1)
+        elif reduce_type == "linear":
+            source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
+            source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
+            left_pred_scores = self.head_layer(source_cand1_encs)
+            right_pred_scores = self.head_layer(source_cand2_encs)
+        elif reduce_type == "single_linear":
+            left_pred_scores = self.single_head_layer(cand1_encs)
+            right_pred_scores = self.single_head_layer(cand2_encs)
+        elif reduce_type == "single_moe":
+            # MOE
+            cand1_encs = self.single_moe_bottom(cand1_encs)
+            cand2_encs = self.single_moe_bottom(cand2_encs)
+            cand1_preds, cand1_aux_loss = self.moe(cand1_encs, train=self.training, collect_gates=not (self.training))
+            cand2_preds, cand2_aux_loss = self.moe(cand2_encs, train=self.training, collect_gates=not (self.training))
+            # go to towers for different tasks
+            left_pred_scores = torch.cat([
+                tower(cand1_pred) for cand1_pred, tower in zip(cand1_preds, self.towers)
+            ], dim=-1)
+            right_pred_scores = torch.cat([
+                tower(cand2_pred) for cand2_pred, tower in zip(cand2_preds, self.towers)
+            ], dim=-1)
         else:
-            loss, pred_probs = self.compute_loss(source_encs, cand1_encs, cand2_encs, left_scores, right_scores)
+            raise NotImplementedError
 
-        pred_probs = pred_probs.view(*original_shape)
+        return left_pred_scores, right_pred_scores, aux_loss
+
+    def _forward(
+        self,
+        input_ids,
+        attention_mask,
+        left_scores,
+        right_scores,
+    ):
+        """
+            Compute scores for each candidate pairs
+        Args:
+            input_ids: [batch_size, n_candidates, seq_len] or [batch_size, seq_len]
+            attention_mask: [batch_size, n_candidates, seq_len] or [batch_size, seq_len]
+            left_scores: [batch_size, n_candidates, n_task] or [batch_size, n_task]
+            right_scores: [batch_size, n_candidates, n_task] or [batch_size, n_task]
+        Returns:
+            pred_probs: [batch_size, n_candidates] or [batch_size]
+        """
+        device = input_ids.device
+        original_shape = input_ids.shape[:-1] # for output
+        if len(input_ids.shape) == 2:
+            input_ids = input_ids.unsqueeze(1)
+            attention_mask = attention_mask.unsqueeze(1)
+            left_scores = left_scores.unsqueeze(1)
+            right_scores = right_scores.unsqueeze(1)
+        batch_size, n_candidates, seq_len = input_ids.shape
+        n_task = left_scores.shape[-1]
+        input_ids = input_ids.view(-1, seq_len)
+        attention_mask = attention_mask.view(-1, seq_len)
+        left_scores = left_scores.view(-1, n_task)
+        right_scores = right_scores.view(-1, n_task)
+        outputs = self.pretrained_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+        encs = outputs.last_hidden_state
+
+        # get the special token <source> and <candidate>
+        source_encs, cand1_encs, cand2_encs = self.pooling(encs, input_ids, attention_mask)
+
+        # reduce
+        left_pred_scores, right_pred_scores, aux_loss = self.reduce(source_encs, cand1_encs, cand2_encs)
+
+        # compute loss
+        loss = torch.tensor(0.0, device=device)
+        loss += aux_loss
+        left_pred_scores = left_pred_scores.view(batch_size, n_candidates, -1)
+        right_pred_scores = right_pred_scores.view(batch_size, n_candidates, -1)
+        left_scores = left_scores.view(batch_size, n_candidates, -1)
+        right_scores = right_scores.view(batch_size, n_candidates, -1)
+        for i in range(batch_size):
+            _loss = self.compute_loss(left_pred_scores[i], right_pred_scores[i], left_scores[i], right_scores[i])
+            loss += _loss
+        loss /= batch_size
+
+        preds = left_pred_scores - right_pred_scores
+        assert preds.shape == (batch_size, n_candidates, n_task)
+        preds = preds.mean(dim=-1)
+        preds = preds.view(*original_shape)
         outputs = {
             "loss": loss,
-            "preds": pred_probs,
+            "preds": preds,
         }
         return outputs
 
@@ -657,6 +739,7 @@ class CrossCompareReranker(nn.Module):
         else:
             raise ValueError(f"Unknown sampling mode: {self.sub_sampling_mode}")
 
+        n_pair = pos_idx.shape[1]
         shuffle_flag = torch.rand(batch_size, n_pair, device=device) < 0.5
         left_idx = torch.where(shuffle_flag, neg_idx, pos_idx)
         right_idx = torch.where(shuffle_flag, pos_idx, neg_idx)
@@ -714,10 +797,10 @@ class CrossCompareReranker(nn.Module):
                 left_idx, right_idx = self.sampling(scores.mean(-1))
                 batch_idx = torch.arange(batch_size).unsqueeze(1)
                 sorted_idx = torch.argsort(scores, dim=1)
-                ranks = torch.arange(n_candidates).view(1, -1, 1).expand_as(scores).to(device)
-                ranks = ranks.scatter(1, sorted_idx, ranks)
-                ranks = (ranks.type(torch.float32) + 1) / n_candidates
-                scores = ranks
+                # ranks = torch.arange(n_candidates).view(1, -1, 1).expand_as(scores).to(device)
+                # ranks = ranks.scatter(1, sorted_idx, ranks)
+                # ranks = ranks.type(torch.float32) / n_candidates
+                # scores = ranks
                 candidate_pair_ids = candidate_pair_ids[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
                 candidate_pair_attention_mask = candidate_pair_attention_mask[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
                 outputs = self._forward(
@@ -727,20 +810,21 @@ class CrossCompareReranker(nn.Module):
                     scores[batch_idx, right_idx]
                 )
                 # add targets to outputs
-                n_pair = left_idx.shape[1]
-                shuffle_idx = torch.rand(batch_size, n_pair, device=device) < 0.5
-                pair_idx = torch.where(shuffle_idx, left_idx, right_idx)
-                forward_target_pair_ids = torch.where(shuffle_idx.unsqueeze(-1), target_pair_ids[batch_idx, 0, pair_idx], target_pair_ids[batch_idx, 1, pair_idx])
-                forward_target_pair_attention_mask = torch.where(shuffle_idx.unsqueeze(-1), target_pair_attention_mask[batch_idx, 0, pair_idx], target_pair_attention_mask[batch_idx, 1, pair_idx])
-                left_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.zeros_like(scores[batch_idx, pair_idx]), torch.ones_like(scores[batch_idx, pair_idx]))
-                right_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.ones_like(scores[batch_idx, pair_idx]), torch.zeros_like(scores[batch_idx, pair_idx]))
-                target_outputs = self._forward(
-                    forward_target_pair_ids,
-                    forward_target_pair_attention_mask,
-                    left_scores,
-                    right_scores
-                )
-                outputs['loss'] += target_outputs['loss']
+                # n_pair = left_idx.shape[1]
+                # shuffle_idx = torch.rand(batch_size, n_pair, device=device) < 0.5
+                # pair_idx = torch.where(shuffle_idx, left_idx, right_idx)
+                # forward_target_pair_ids = torch.where(shuffle_idx.unsqueeze(-1), target_pair_ids[batch_idx, 0, pair_idx], target_pair_ids[batch_idx, 1, pair_idx])
+                # forward_target_pair_attention_mask = torch.where(shuffle_idx.unsqueeze(-1), target_pair_attention_mask[batch_idx, 0, pair_idx], target_pair_attention_mask[batch_idx, 1, pair_idx])
+                # left_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.zeros_like(scores[batch_idx, pair_idx]), torch.ones_like(scores[batch_idx, pair_idx]))
+                # right_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.ones_like(scores[batch_idx, pair_idx]), torch.zeros_like(scores[batch_idx, pair_idx]))
+                # target_outputs = self._forward(
+                #     forward_target_pair_ids,
+                #     forward_target_pair_attention_mask,
+                #     left_scores,
+                #     right_scores
+                # )
+                # # outputs['loss'] += target_outputs['loss']
+                # outputs = target_outputs
 
             else:
                 batch_size, n_candidates, _, candidate_len = candidate_pair_ids.shape
@@ -813,7 +897,7 @@ class CrossCompareReranker(nn.Module):
                     next_idxs.append(next_idx)
                     cur_idx = better_idx
                 outputs = {}
-                outputs['loss'] = loss
+                outputs['loss'] = loss / (n_candidates - 1) / 2
                 outputs["select_process"] = []
                 outputs["select_process"].append(torch.stack([initial_idx] + better_idxs[:-1], dim=1))
                 outputs["select_process"].append(torch.stack(next_idxs, dim=1))

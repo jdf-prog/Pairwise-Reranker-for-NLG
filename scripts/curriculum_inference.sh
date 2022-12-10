@@ -39,9 +39,9 @@ curriculum_inference.py \
     --max_data_size 100 \
     --num_shards "$num_shards" \
     --shard_id "$shard_id" \
-    --load_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm_curriculum_right-based/checkpoint-best" \
+    --load_checkpoint "./outputs/crosscompare/roberta-large/train_cnndm_curriculum_right-based/checkpoint-best" \
     --output_dir "./temp"
-    # --load_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm/checkpoint-9375" \
+    # --load_checkpoint "./outputs/crosscompare/roberta-large/train_cnndm/checkpoint-9375" \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 100 \

@@ -68,7 +68,7 @@ def main(args):
 
     ds = load_prepared_dataset(args.dataset, args.set)
     ds.analyze_oracle()
-    save_prepared_dataset(args.dataset, args.set, ds)
+    # save_prepared_dataset(args.dataset, args.set, ds)
 
 
 
@@ -83,6 +83,7 @@ if __name__ == "__main__":
     # metrics
     parser.add_argument("--metrics", type=str, default="rouge,bleu",
         help="metrics to compute, support rouge, bleu, bleurt, cider, spice")
+    parser.add_argument("--save", type=str2bool, default=False)
     args = parser.parse_args()
     args.metrics = args.metrics.split(",")
     print(args)
