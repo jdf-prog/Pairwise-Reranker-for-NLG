@@ -824,6 +824,12 @@ class CrossCompareReranker(nn.Module):
                     masks2[i, sep_token_idx2[i] + 1:],
                     masks3[i, sep_token_idx3[i] + 1:],
                 ], dim=0))
+                assert masks1[i, :sep_token_idx1[i] + 1].eq(1).all(), masks1[i, :sep_token_idx1[i] + 1]
+                assert masks2[i, :sep_token_idx2[i] + 1].eq(1).all(), masks2[i, :sep_token_idx2[i] + 1]
+                assert masks3[i, :sep_token_idx3[i] + 1].eq(1).all(), masks3[i, :sep_token_idx3[i] + 1]
+                assert masks1[i, sep_token_idx1[i] + 1:].eq(0).all(), masks1[i, sep_token_idx1[i] + 1:]
+                assert masks2[i, sep_token_idx2[i] + 1:].eq(0).all(), masks2[i, sep_token_idx2[i] + 1:]
+                assert masks3[i, sep_token_idx3[i] + 1:].eq(0).all(), masks3[i, sep_token_idx3[i] + 1:]
 
         else:
             for i in range(bz):
@@ -872,6 +878,14 @@ class CrossCompareReranker(nn.Module):
                 candidate_attention_mask: [batch_size, 2*cand_len]
                 scores: [batch_size, n_tasks, 2] (left, right)
         """
+        # print("source")
+        # print(self.tokenizer.decode(source_ids[0]))
+        # print("target")
+        # print(self.tokenizer.decode(target_ids[0]))
+        # print("candidate")
+        # print(self.tokenizer.batch_decode(candidate_ids[0]))
+        # print("scores")
+        # print(scores[0])
         device = source_ids.device
         outputs = {}
         if candidate_ids.dim() == 2:
@@ -922,8 +936,8 @@ class CrossCompareReranker(nn.Module):
                 cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, n_pair, 1)
                 cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
                 cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, n_pair, 1)
-                left_cand_ids[:,:,1] = cand1_prefix_ids[:,:,0]
-                right_cand_ids[:,:,1] = cand2_prefix_ids[:,:,0]
+                left_cand_ids[:,:,0] = cand1_prefix_ids[:,:,0]
+                right_cand_ids[:,:,0] = cand2_prefix_ids[:,:,0]
                 candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
                     expanded_source_ids,
                     expanded_source_attention_mask,
@@ -931,9 +945,16 @@ class CrossCompareReranker(nn.Module):
                     left_cand_attention_mask,
                     right_cand_ids,
                     right_cand_attention_mask)
-                print(self.tokenizer.decode(candidate_pair_ids[0][0]))
                 left_scores = scores[batch_idx, left_idx]
                 right_scores = scores[batch_idx, right_idx]
+
+                # print("candidate pair")
+                # print(self.tokenizer.batch_decode(candidate_pair_ids[0]))
+                # print("left scores")
+                # print(left_scores[0])
+                # print("right scores")
+                # print(right_scores[0])
+
                 outputs = self._forward(
                     candidate_pair_ids,
                     candidate_pair_attention_mask,
@@ -969,8 +990,8 @@ class CrossCompareReranker(nn.Module):
                     left_scores = scores[batch_idx, cur_idx]
                     right_scores = scores[batch_idx, next_idx]
                     # left-right
-                    left_cand_ids[:,1] = cand1_prefix_ids[:,0]
-                    right_cand_ids[:,1] = cand2_prefix_ids[:,0]
+                    left_cand_ids[:,0] = cand1_prefix_ids[:,0]
+                    right_cand_ids[:,0] = cand2_prefix_ids[:,0]
                     candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
                         source_ids,
                         source_attention_mask,
@@ -978,7 +999,6 @@ class CrossCompareReranker(nn.Module):
                         left_cand_attention_mask,
                         right_cand_ids,
                         right_cand_attention_mask)
-                    print("forward", self.tokenizer.decode(candidate_pair_ids[0]))
                     _outputs = self._forward(
                         candidate_pair_ids,
                         candidate_pair_attention_mask,
@@ -988,8 +1008,8 @@ class CrossCompareReranker(nn.Module):
                     loss += _outputs['loss']
                     preds = _outputs['preds']
                     # right-left
-                    left_cand_ids[:,1] = cand2_prefix_ids[:,0]
-                    right_cand_ids[:,1] = cand1_prefix_ids[:,0]
+                    left_cand_ids[:,0] = cand2_prefix_ids[:,0]
+                    right_cand_ids[:,0] = cand1_prefix_ids[:,0]
                     candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
                         source_ids,
                         source_attention_mask,
@@ -997,7 +1017,6 @@ class CrossCompareReranker(nn.Module):
                         right_cand_attention_mask,
                         left_cand_ids,
                         left_cand_attention_mask)
-                    print("backward", self.tokenizer.decode(candidate_pair_ids[0]))
                     _outputs = self._forward(
                         candidate_pair_ids,
                         candidate_pair_attention_mask,
