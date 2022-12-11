@@ -29,6 +29,11 @@ class CurriculumDataset(torch.utils.data.Dataset):
                 self.index_to_data.append((i,j,k))
         # subsampling, reduce the amount from O(n^2) to O(n)
         self.index_to_data = np.array(self.index_to_data)
+        random_idx = np.random.permutation(len(self.index_to_data))
+        random_idx = random_idx[:len(data) * n_candidates]
+        random_idx = np.sort(random_idx)
+        self.index_to_data = self.index_to_data[random_idx]
+
 
 
     def __len__(self):
@@ -92,7 +97,7 @@ class CurriculumSampler(Sampler[int]):
             return indices
         else:
             self.num_curriculum_learned = 0
-            indices = np.arange(0, self.curriculum_size)
+            indices = np.arange(0, min(self.curriculum_size, len(self.data_source)))
             return indices
 
 
@@ -115,6 +120,8 @@ class CurriculumCallback(TrainerCallback):
         **kwargs):
         # Adjust the next epoch's data according to the model performance
         if args.curriculum_learning == 'self-adapted':
+            if not hasattr(self, 'curriculum_step'):
+                self.curriculum_step = 0
             # print("Adjusting Curriculum")
             # print("Curriculum indices: ", train_dataloader.sampler.indices[:100])
             next_curriculum_indices = train_dataloader.sampler.get_next_curriculum_indices()
@@ -148,19 +155,22 @@ class CurriculumCallback(TrainerCallback):
             preds = np.concatenate(preds)
             dif_scores = np.concatenate(dif_scores)
             error_indices_flag = preds * dif_scores < 0
-            # print("Error indices flag: ", error_indices_flag[:100])
             error_indices = np.where(error_indices_flag)[0]
             right_indices = np.where(~error_indices_flag)[0]
-            # print("Error indices local: ", error_indices[:100])
-            print("Select {}/{} indices for next curriculum".format(len(error_indices), len(next_curriculum_indices)))
-            print("accuracy", np.mean(~error_indices_flag))
             error_indices = np.array(next_curriculum_indices)[error_indices]
             right_indices = np.array(next_curriculum_indices)[right_indices]
-            # selected_indices = np.concatenate([error_indices, right_indices[:len(right_indices) // 10]])
-            selected_indices = error_indices
-            # print("Error indices global: ", error_indices[:100])
+            error_ratio = self.curriculum_step / train_dataloader.sampler.curriculum_size
+            right_ratio = 1 - error_ratio
+            sub_error_indices = error_indices[:int(len(error_indices) * error_ratio)]
+            sub_right_indices = right_indices[:int(len(right_indices) * right_ratio)]
+            selected_indices = np.concatenate([sub_error_indices, sub_right_indices])
+            np.random.shuffle(selected_indices)
+            print("Select {}/{} error indices for next curriculum".format(len(sub_error_indices), len(error_indices)))
+            print("Select {}/{} right indices for next curriculum".format(len(sub_right_indices), len(right_indices)))
+            print("accuracy", np.mean(~error_indices_flag))
             assert len(selected_indices.shape) == 1
             train_dataloader.sampler.update_indices(selected_indices)
+            self.curriculum_step += 1
         else:
             pass
         return control

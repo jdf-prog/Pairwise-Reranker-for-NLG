@@ -399,8 +399,8 @@ class CrossCompareReranker(nn.Module):
         self.sub_sampling_ratio = self.args["sub_sampling_ratio"]
         self.loss_type = self.args["loss_type"]
         self.drop_out = self.args.get("drop_out", 0.05)
-        self.pooling_type = self.args.get("pooling", "special")
-        self.reduce_type = self.args.get("reduce", "single_linear")
+        self.pooling_type = self.args.get("pooling_type", "special")
+        self.reduce_type = self.args.get("reduce_type", "single_linear")
 
         # LM
         self.pretrained_model = pretrained_model
@@ -709,8 +709,10 @@ class CrossCompareReranker(nn.Module):
             unique_idx.append(_idx)
             unique_scores.append(_scores)
         min_uni_cand_len = min([len(_idx) for _idx in unique_idx])
-        unique_idx = [idx[:min_uni_cand_len] for idx in unique_idx]
-        unique_scores = [scores[:min_uni_cand_len] for scores in unique_scores]
+
+        random_perm_idx = [torch.randperm(len(_idx), device=device)[:min_uni_cand_len] for _idx in unique_idx]
+        unique_idx = [idx[perm_idx] for idx, perm_idx in zip(unique_idx, random_perm_idx)]
+        unique_scores = [scores[perm_idx] for scores, perm_idx in zip(unique_scores, random_perm_idx)]
         unique_idx = torch.stack(unique_idx, dim=0)
         unique_scores = torch.stack(unique_scores, dim=0)
         n_candidates = min_uni_cand_len
@@ -736,6 +738,33 @@ class CrossCompareReranker(nn.Module):
             pos_idx = sorted_idx[:, 0:-step:step]
             neg_idx = sorted_idx[:, step::step]
             n_pair = pos_idx.shape[1]
+        elif self.sub_sampling_mode == "poisson_dynamic":
+            # 2. using rank dif as difficulty measure function
+            self.args['training_steps'] += batch_size
+            if self.args['training_steps'] > self.args['training_data_size']:
+                self.args['training_steps'] = 0
+            poisson_rate_update_steps = self.args['training_data_size'] // n_candidates
+            poisson_rate = self.args['training_steps'] // poisson_rate_update_steps + 1
+            poisson_rate = max(poisson_rate, 1)
+            # print(poisson_rate_update_steps) # debug
+            # print(f"poisson_rate: {poisson_rate}") # debug
+            poisson_sampling_dif_ranks = torch.clip(
+                torch.poisson(torch.ones(batch_size, n_pair) * poisson_rate), 1, n_candidates - 1
+            ).type(torch.int64).to(device)
+            poisson_sampling_dif_ranks = n_candidates - 1 - poisson_sampling_dif_ranks
+            # print(f"poisson_sampling_dif_ranks: {poisson_sampling_dif_ranks}") # debug
+            pos_idx = torch.tensor([
+                [random.randint(0, n_candidates - 1 - poisson_sampling_dif_ranks[i,j].item())
+                    for j in range(n_pair)] for i in range(batch_size)
+            ]).type(torch.int64).to(device)
+            neg_idx = pos_idx + poisson_sampling_dif_ranks
+            # print(f"pos_idx: {pos_idx}") # debug
+            # print(f"neg_idx: {neg_idx}") # debug
+            # print(f"sorted_idx: {sorted_idx}") # debug
+            pos_idx = sorted_idx.gather(1, pos_idx)
+            neg_idx = sorted_idx.gather(1, neg_idx)
+            # print(f"pos_idx: {pos_idx}") # debug
+            # print(f"neg_idx: {neg_idx}") # debug
         else:
             raise ValueError(f"Unknown sampling mode: {self.sub_sampling_mode}")
 
@@ -750,32 +779,113 @@ class CrossCompareReranker(nn.Module):
 
         return left_idx, right_idx
 
+    def cat_ids(self, ids1, masks1, ids2, masks2, ids3=None, masks3=None):
+        """
+        Concatenate ids and masks, move padding to the end
+        """
+        assert ids1.shape[:-1] == ids2.shape[:-1]
+        assert ids1.shape[:-1] == ids3.shape[:-1] if ids3 is not None else True
+        ori_shape = ids1.shape[:-1]
+        ids1 = ids1.view(-1, ids1.shape[-1])
+        ids2 = ids2.view(-1, ids2.shape[-1])
+        masks1 = masks1.view(-1, masks1.shape[-1])
+        masks2 = masks2.view(-1, masks2.shape[-1])
+        bz = ids1.shape[0]
+        sep_token_idx1 = ids1.eq(self.sep_token_id)
+        sep_token_idx2 = ids2.eq(self.sep_token_id)
+        assert sep_token_idx1.sum(-1).eq(sep_token_idx1.sum(-1)[0]).all(), sep_token_idx1.sum(-1)
+        assert sep_token_idx2.sum(-1).eq(sep_token_idx2.sum(-1)[0]).all(), sep_token_idx2.sum(-1)
+        assert sep_token_idx1.sum(-1).ge(1).all(), self.tokenizer.decode(ids1[0])
+        assert sep_token_idx2.sum(-1).ge(1).all(), sep_token_idx2.sum(-1)
+        sep_token_idx1 = sep_token_idx1.nonzero()[:, 1].reshape(bz, -1)[:, -1]
+        sep_token_idx2 = sep_token_idx2.nonzero()[:, 1].reshape(bz, -1)[:, -1]
+        cat_ids = []
+        cat_masks = []
+        if ids3 is not None:
+            ids3 = ids3.view(-1, ids3.shape[-1])
+            masks3 = masks3.view(-1, masks3.shape[-1])
+            sep_token_idx3 = ids3.eq(self.sep_token_id)
+            assert sep_token_idx3.sum(-1).eq(sep_token_idx3.sum(-1)[0]).all(), sep_token_idx3.sum(-1)
+            sep_token_idx3 = sep_token_idx3.nonzero()[:, 1].reshape(bz, -1)[:, -1]
+            for i in range(bz):
+                cat_ids.append(torch.cat([
+                    ids1[i, :sep_token_idx1[i] + 1],
+                    ids2[i, :sep_token_idx2[i] + 1],
+                    ids3[i, :sep_token_idx3[i] + 1],
+                    ids1[i, sep_token_idx1[i] + 1:],
+                    ids2[i, sep_token_idx2[i] + 1:],
+                    ids3[i, sep_token_idx3[i] + 1:],
+                ], dim=0))
+                cat_masks.append(torch.cat([
+                    masks1[i, :sep_token_idx1[i] + 1],
+                    masks2[i, :sep_token_idx2[i] + 1],
+                    masks3[i, :sep_token_idx3[i] + 1],
+                    masks1[i, sep_token_idx1[i] + 1:],
+                    masks2[i, sep_token_idx2[i] + 1:],
+                    masks3[i, sep_token_idx3[i] + 1:],
+                ], dim=0))
+
+        else:
+            for i in range(bz):
+                cat_ids.append(torch.cat([
+                    ids1[i, :sep_token_idx1[i] + 1],
+                    ids2[i, :sep_token_idx2[i] + 1],
+                    ids1[i, sep_token_idx1[i] + 1:],
+                    ids2[i, sep_token_idx2[i] + 1:],
+                ], dim=0))
+                cat_masks.append(torch.cat([
+                    masks1[i, :sep_token_idx1[i] + 1],
+                    masks2[i, :sep_token_idx2[i] + 1],
+                    masks1[i, sep_token_idx1[i] + 1:],
+                    masks2[i, sep_token_idx2[i] + 1:],
+                ], dim=0))
+        cat_ids = torch.stack(cat_ids, dim=0)
+        cat_masks = torch.stack(cat_masks, dim=0)
+        cat_ids = cat_ids.reshape(ori_shape + (-1,))
+        cat_masks = cat_masks.reshape(ori_shape + (-1,))
+        return cat_ids, cat_masks
+
     def forward(
         self,
-        candidate_pair_ids,
-        candidate_pair_attention_mask,
+        source_ids,
+        source_attention_mask,
+        target_ids,
+        target_attention_mask,
+        candidate_ids,
+        candidate_attention_mask,
         scores,
-        target_pair_ids=None,
-        target_pair_attention_mask=None,
     ):
         """
             Compute scores for each candidate
         Args:
-            passing_in as group:
-                candidate_pair_ids: [batch_size, n_candidates, n_candidates, candidate_len]
-                candidate_pair_attention_mask: [batch_size, n_candidates, n_candidates, candidate_len]
+            always:
+                source_ids: [batch_size, src_len]
+                source_attention_mask: [batch_size, src_len]
+                target_ids: [batch_size, cand_len]
+                target_attention_mask: [batch_size, cand_len]
+            passing in as individually:
+                candidate_ids: [batch_size, n_candidates, cand_len]
+                candidate_attention_mask: [batch_size, n_candidates, cand_len]
                 scores: [batch_size, n_candidates, n_tasks]
-                target_pair_ids: [batch_size, 2, n_candidates, candidate_len]
-                target_pair_attention_mask: [batch_size, 2, n_candidates, candidate_len]
-            passing in as individual:
-                candidate_pair_ids: [batch_size, candidate_len]
-                candidate_pair_attention_mask: [batch_size, candidate_len]
+            passing in as pair:
+                candidate_ids: [batch_size, 2*cand_len]
+                candidate_attention_mask: [batch_size, 2*cand_len]
                 scores: [batch_size, n_tasks, 2] (left, right)
         """
-        device = candidate_pair_ids.device
+        device = source_ids.device
         outputs = {}
-        if candidate_pair_ids.dim() == 2:
-            # passing in as individual
+        if candidate_ids.dim() == 2:
+            # passing in as pair
+            batch_size, src_len = source_ids.shape
+            batch_size, cand_len = candidate_ids.shape
+            cand_len = cand_len // 2
+            assert src_len + 2*cand_len < self.tokenizer.model_max_length
+            candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                source_ids,
+                source_attention_mask,
+                candidate_ids[:, 1:],
+                candidate_attention_mask[:, 1:]
+            )
             _outputs = self._forward(
                 candidate_pair_ids,
                 candidate_pair_attention_mask,
@@ -784,10 +894,10 @@ class CrossCompareReranker(nn.Module):
             )
             outputs['loss'] = _outputs['loss']
             outputs['preds'] = _outputs['preds']
-
-        elif candidate_pair_ids.dim() == 4:
-
-            # passing in as group
+        elif candidate_ids.dim() == 3:
+            # passing in as individual
+            batch_size, src_len = source_ids.shape
+            batch_size, n_candidates, cand_len = candidate_ids.shape
             if self.training:
                 # subsampling
                 batch_size, n_candidates, n_tasks = scores.shape
@@ -801,33 +911,37 @@ class CrossCompareReranker(nn.Module):
                 # ranks = ranks.scatter(1, sorted_idx, ranks)
                 # ranks = ranks.type(torch.float32) / n_candidates
                 # scores = ranks
-                candidate_pair_ids = candidate_pair_ids[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
-                candidate_pair_attention_mask = candidate_pair_attention_mask[batch_idx, left_idx, right_idx] # [batch_size, n_pair, candidate_len]
+                left_cand_ids = candidate_ids[batch_idx, left_idx]
+                right_cand_ids = candidate_ids[batch_idx, right_idx]
+                left_cand_attention_mask = candidate_attention_mask[batch_idx, left_idx]
+                right_cand_attention_mask = candidate_attention_mask[batch_idx, right_idx]
+                n_pair = left_idx.shape[1]
+                expanded_source_ids = source_ids.unsqueeze(1).expand(batch_size, n_pair, src_len)
+                expanded_source_attention_mask = source_attention_mask.unsqueeze(1).expand(batch_size, n_pair, src_len)
+                cand1_prefix_ids = torch.tensor(self.tokenizer.cand1_prefix_id).to(device)
+                cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, n_pair, 1)
+                cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
+                cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, n_pair, 1)
+                left_cand_ids[:,:,1] = cand1_prefix_ids[:,:,0]
+                right_cand_ids[:,:,1] = cand2_prefix_ids[:,:,0]
+                candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                    expanded_source_ids,
+                    expanded_source_attention_mask,
+                    left_cand_ids,
+                    left_cand_attention_mask,
+                    right_cand_ids,
+                    right_cand_attention_mask)
+                print(self.tokenizer.decode(candidate_pair_ids[0][0]))
+                left_scores = scores[batch_idx, left_idx]
+                right_scores = scores[batch_idx, right_idx]
                 outputs = self._forward(
                     candidate_pair_ids,
                     candidate_pair_attention_mask,
-                    scores[batch_idx, left_idx],
-                    scores[batch_idx, right_idx]
+                    left_scores,
+                    right_scores,
                 )
-                # add targets to outputs
-                # n_pair = left_idx.shape[1]
-                # shuffle_idx = torch.rand(batch_size, n_pair, device=device) < 0.5
-                # pair_idx = torch.where(shuffle_idx, left_idx, right_idx)
-                # forward_target_pair_ids = torch.where(shuffle_idx.unsqueeze(-1), target_pair_ids[batch_idx, 0, pair_idx], target_pair_ids[batch_idx, 1, pair_idx])
-                # forward_target_pair_attention_mask = torch.where(shuffle_idx.unsqueeze(-1), target_pair_attention_mask[batch_idx, 0, pair_idx], target_pair_attention_mask[batch_idx, 1, pair_idx])
-                # left_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.zeros_like(scores[batch_idx, pair_idx]), torch.ones_like(scores[batch_idx, pair_idx]))
-                # right_scores = torch.where(shuffle_idx.unsqueeze(-1), torch.ones_like(scores[batch_idx, pair_idx]), torch.zeros_like(scores[batch_idx, pair_idx]))
-                # target_outputs = self._forward(
-                #     forward_target_pair_ids,
-                #     forward_target_pair_attention_mask,
-                #     left_scores,
-                #     right_scores
-                # )
-                # # outputs['loss'] += target_outputs['loss']
-                # outputs = target_outputs
-
             else:
-                batch_size, n_candidates, _, candidate_len = candidate_pair_ids.shape
+                batch_size, n_candidates, cand_len = candidate_ids.shape
                 sorted_idx = torch.argsort(scores.mean(-1), dim=1, descending=True) # [batch_size, n_candidates]
                 ranks = torch.zeros_like(sorted_idx)
                 ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidates, device=device)
@@ -841,32 +955,55 @@ class CrossCompareReranker(nn.Module):
                 better_idxs = []
                 ranks_acc_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
                 ranks_consistency_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
+                cand1_prefix_ids = torch.tensor(self.tokenizer.cand1_prefix_id).to(device)
+                cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, 1)
+                cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
+                cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, 1)
                 for i in range(1, n_candidates):
                     next_idx = permu[:, i] # [batch_size]
-
-                    to_model_ids = candidate_pair_ids[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
-                    to_model_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), cur_idx.unsqueeze(1), next_idx.unsqueeze(1), :]
-                    to_model_ids = to_model_ids.view(batch_size, candidate_len)
-                    to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
+                    batch_idx = torch.arange(batch_size).to(device)
+                    left_cand_ids = candidate_ids[batch_idx, cur_idx]
+                    right_cand_ids = candidate_ids[batch_idx, next_idx]
+                    left_cand_attention_mask = candidate_attention_mask[batch_idx, cur_idx]
+                    right_cand_attention_mask = candidate_attention_mask[batch_idx, next_idx]
+                    left_scores = scores[batch_idx, cur_idx]
+                    right_scores = scores[batch_idx, next_idx]
+                    # left-right
+                    left_cand_ids[:,1] = cand1_prefix_ids[:,0]
+                    right_cand_ids[:,1] = cand2_prefix_ids[:,0]
+                    candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                        source_ids,
+                        source_attention_mask,
+                        left_cand_ids,
+                        left_cand_attention_mask,
+                        right_cand_ids,
+                        right_cand_attention_mask)
+                    print("forward", self.tokenizer.decode(candidate_pair_ids[0]))
                     _outputs = self._forward(
-                        to_model_ids,
-                        to_model_attention_mask,
-                        scores[torch.arange(batch_size), cur_idx],
-                        scores[torch.arange(batch_size), next_idx]
-                    ) # [batch_size]
+                        candidate_pair_ids,
+                        candidate_pair_attention_mask,
+                        left_scores,
+                        right_scores,
+                    )
                     loss += _outputs['loss']
                     preds = _outputs['preds']
-
-                    to_model_ids = candidate_pair_ids[torch.arange(batch_size).unsqueeze(1), next_idx.unsqueeze(1), cur_idx.unsqueeze(1), :]
-                    to_model_attention_mask = candidate_pair_attention_mask[torch.arange(batch_size).unsqueeze(1), next_idx.unsqueeze(1), cur_idx.unsqueeze(1), :]
-                    to_model_ids = to_model_ids.view(batch_size, candidate_len)
-                    to_model_attention_mask = to_model_attention_mask.view(batch_size, candidate_len)
+                    # right-left
+                    left_cand_ids[:,1] = cand2_prefix_ids[:,0]
+                    right_cand_ids[:,1] = cand1_prefix_ids[:,0]
+                    candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                        source_ids,
+                        source_attention_mask,
+                        right_cand_ids,
+                        right_cand_attention_mask,
+                        left_cand_ids,
+                        left_cand_attention_mask)
+                    print("backward", self.tokenizer.decode(candidate_pair_ids[0]))
                     _outputs = self._forward(
-                        to_model_ids,
-                        to_model_attention_mask,
-                        scores[torch.arange(batch_size), next_idx],
-                        scores[torch.arange(batch_size), cur_idx]
-                    ) # [batch_size]
+                        candidate_pair_ids,
+                        candidate_pair_attention_mask,
+                        right_scores,
+                        left_scores,
+                    )
                     loss += _outputs['loss']
                     preds_inv = -_outputs['preds']
 

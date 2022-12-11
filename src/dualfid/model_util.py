@@ -49,8 +49,8 @@ def build_pretrained_model(model_type, model_name, cache_dir=None):
         model = BartForConditionalGeneration.from_pretrained(model_name, cache_dir = cache_dir)
     elif model_type.startswith("deberta"):
         print("\nUsing DeBERTa model")
-        from transformers import DebertaModel
-        model = DebertaModel.from_pretrained(model_name, cache_dir = cache_dir)
+        from transformers import AutoModel
+        model = AutoModel.from_pretrained(model_name, cache_dir = cache_dir)
     elif model_type.startswith("xlm-roberta"):
         print("\nUsing XLM-RoBERTa model")
         from transformers import XLMRobertaModel
@@ -77,8 +77,8 @@ def build_tokenizer(model_type, model_name, cache_dir=None):
         tokenizer = BartTokenizerFast.from_pretrained(model_name, cache_dir = cache_dir)
     elif model_type.startswith("deberta"):
         print("\nUsing DeBERTa tokenizer")
-        from transformers import DebertaTokenizer
-        tokenizer = DebertaTokenizer.from_pretrained(model_name, cache_dir = cache_dir)
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir = cache_dir)
     elif model_type.startswith("xlm-roberta"):
         print("\nUsing XLM-RoBERTa tokenizer")
         from transformers import XLMRobertaTokenizerFast

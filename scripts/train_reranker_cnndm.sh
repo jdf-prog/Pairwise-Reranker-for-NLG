@@ -28,7 +28,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "train_cnndm_single_moe_BCE" \
+    --run_name "train_cnndm_BCE_single_linear" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -37,18 +37,20 @@ train_reranker.py \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 32 \
+    --gradient_accumulation_steps 16 \
     --num_train_epochs 2 \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
+    --reduce_type  "single_linear" \
+    --pooling_type "special" \
     --sub_sampling_ratio 0.1 \
-    --max_train_data_size 50000 \
-    --max_eval_data_size 500 \
+    --max_train_data_size 100000 \
+    --max_eval_data_size 1000 \
     --max_predict_data_size -1 \
     --using_metrics "rouge1+rouge2+rougeLsum" \
     --evaluation_strategy "steps" \

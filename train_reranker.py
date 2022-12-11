@@ -99,7 +99,7 @@ def main(args):
         "sub_sampling_mode": args.sub_sampling_mode,
         "loss_type": args.loss_type,
         "new_num_tokens": len(tokenizer),
-        "training_data_size": len(train_dataset) if train_dataset else 0,
+        "training_data_size": len(train_dataset) * args.num_train_epochs if train_dataset else 0,
         "n_candidates": args.n_candidates,
         "pooling_type": args.pooling_type,
         "reduce_type": args.reduce_type,
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance", "random", "poisson_dynamic", "top_bottom_random", "custom"
+        "importance", "random", "poisson_dynamic", "top_bottom_random"
     ], default="top_bottom")
     parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)
@@ -356,7 +356,6 @@ if __name__ == "__main__":
     # curriculum learning
     parser.add_argument("--curriculum_learning", type=str, default=None,
         choices=["self-adapted", "easy2hard", "error-based", None])
-    parser.add_argument("--num_curriculum", type=int, default=1)
     parser.add_argument("--curriculum_size", type=int, default=1000,
         help="training data size for each curriculum as a epoch")
     parser.add_argument("--curriculum_indices_path", type=str, default=None,
@@ -380,6 +379,8 @@ if __name__ == "__main__":
         print("Using curriculum learning")
         args.num_curriculum = args.num_train_epochs
         Dataset = CurriculumDataset
+    else:
+        args.num_curriculum = None
 
     # set up logging
     if args.log_level == "passive":

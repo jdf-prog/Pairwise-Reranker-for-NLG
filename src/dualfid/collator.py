@@ -186,11 +186,16 @@ class CrossCompareCollator(object):
 
         # add prefix
         tokenizer.add_tokens([self.source_prefix, self.candidate1_prefix, self.candidate2_prefix]) # debug
+        tokenizer.source_prefix = self.source_prefix
+        tokenizer.candidate1_prefix = self.candidate1_prefix
+        tokenizer.candidate2_prefix = self.candidate2_prefix
+        tokenizer.source_prefix_id = tokenizer.convert_tokens_to_ids(self.source_prefix)
+        tokenizer.cand1_prefix_id = tokenizer.convert_tokens_to_ids(self.candidate1_prefix)
+        tokenizer.cand2_prefix_id = tokenizer.convert_tokens_to_ids(self.candidate2_prefix)
 
 
     def __call__(self, batch):
-        batch_size = len(batch)
-        batch_source = [b['source'] for b in batch]
+        batch_source = [self.source_prefix+b['source'] for b in batch]
         batch_target = [b['target'] for b in batch]
         batch_candidates = [b['candidates'] for b in batch]
         batch_scores = [b['scores'] for b in batch]
@@ -198,40 +203,20 @@ class CrossCompareCollator(object):
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
         batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
-        n_candidates = len(batch_candidates[0])
 
-        batch_candidate_pairs = [[[None for _ in range(n_candidates)] for _ in range(n_candidates)] for _ in range(batch_size)]
-        batch_target_pairs1 = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
-        batch_target_pairs2 = [[None for _ in range(n_candidates)] for _ in range(batch_size)]
-        for bz in range(batch_size):
-            n_candidates = len(batch_candidates[bz])
-            for i in range(n_candidates):
-                for j in range(n_candidates):
-                    batch_candidate_pairs[bz][i][j] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_candidates[bz][j]])
-                batch_target_pairs1[bz][i] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_candidates[bz][i], self.candidate2_prefix+batch_target[bz]])
-                batch_target_pairs2[bz][i] = self.separate_token.join([self.source_prefix+batch_source[bz], self.candidate1_prefix+batch_target[bz], self.candidate2_prefix+batch_candidates[bz][i]])
-
-
-        encoded_cand_pair_ids, encoded_cand_pair_masks = [], []
-        for bz in range(batch_size):
-            n_candidates = len(batch_candidates[bz])
-            ids, mask = encode_batch_text(batch_candidate_pairs[bz], self.tokenizer, self.max_length)
-            encoded_cand_pair_ids.append(ids)
-            encoded_cand_pair_masks.append(mask)
-        encoded_cand_pair_ids = torch.stack(encoded_cand_pair_ids, dim=0)
-        encoded_cand_pair_masks = torch.stack(encoded_cand_pair_masks, dim=0)
-        encoded_target_pair_ids1, encoded_target_pair_masks1 = encode_batch_text(batch_target_pairs1, self.tokenizer, self.max_length)
-        encoded_target_pair_ids2, encoded_target_pair_masks2 = encode_batch_text(batch_target_pairs2, self.tokenizer, self.max_length)
-        encoded_target_pair_ids = torch.stack([encoded_target_pair_ids1, encoded_target_pair_ids2], dim=1)
-        encoded_target_pair_masks = torch.stack([encoded_target_pair_masks1, encoded_target_pair_masks2], dim=1)
+        source_ids, source_masks = encode_texts(batch_source, self.tokenizer, self.source_maxlength)
+        target_ids, target_masks = encode_texts(batch_target, self.tokenizer, self.candidate_maxlength)
+        candidate_ids, candidate_masks = encode_batch_text(batch_candidates, self.tokenizer, self.candidate_maxlength)
 
         scores = torch.tensor(batch_scores)
         return {
-            "candidate_pair_ids" : encoded_cand_pair_ids,
-            "candidate_pair_attention_mask" : encoded_cand_pair_masks,
+            "source_ids" : source_ids,
+            "source_attention_mask" : source_masks,
+            "target_ids" : target_ids,
+            "target_attention_mask" : target_masks,
+            "candidate_ids" : candidate_ids,
+            "candidate_attention_mask" : candidate_masks,
             "scores" : scores,
-            "target_pair_ids" : encoded_target_pair_ids,
-            "target_pair_attention_mask" : encoded_target_pair_masks,
         }
 
 class CurriculumCrossCompareCollator(object):
@@ -274,22 +259,28 @@ class CurriculumCrossCompareCollator(object):
         batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
         batch_candidate1 = get_truncated_text(batch_candidate1, self.tokenizer, self.candidate_maxlength)
         batch_candidate2 = get_truncated_text(batch_candidate2, self.tokenizer, self.candidate_maxlength)
+        batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
 
         batch_candidate_pairs = [
             self.separate_token.join([
-                batch_source[i],
                 self.candidate1_prefix+batch_candidate1[i],
                 self.candidate2_prefix+batch_candidate2[i],
             ])
             for i in range(batch_size)
         ]
         # print(batch_candidate_pairs)
-        encoded_cand_pair_ids, encoded_cand_pair_masks = encode_texts(batch_candidate_pairs, self.tokenizer, self.max_length)
+        source_ids, source_masks = encode_texts(batch_source, self.tokenizer, self.source_maxlength)
+        target_ids, target_masks = encode_texts(batch_target, self.tokenizer, self.candidate_maxlength)
+        cand_pair_ids, cand_pair_masks = encode_texts(batch_candidate_pairs, self.tokenizer, 2*self.candidate_maxlength)
         scores = torch.stack([batch_score1, batch_score2], dim=-1)
 
         return {
-            "candidate_pair_ids" : encoded_cand_pair_ids,
-            "candidate_pair_attention_mask" : encoded_cand_pair_masks,
+            "source_ids" : source_ids,
+            "source_attention_mask" : source_masks,
+            "target_ids" : target_ids,
+            "target_attention_mask" : target_masks,
+            "candidate_ids" : cand_pair_ids,
+            "candidate_attention_mask" : cand_pair_masks,
             "scores" : scores,
         }
 
