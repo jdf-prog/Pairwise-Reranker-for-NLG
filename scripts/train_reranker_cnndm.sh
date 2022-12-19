@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --time=10:00:00
+#SBATCH --time=24:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:1
+#SBATCH --qos=general-8000
 #SBATCH -n 1
-#SBATCH
 
 
 dataset="cnndm"
@@ -28,7 +28,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "roberta" \
     --model_name "roberta-large" \
-    --run_name "train_cnndm_BCE_single_linear" \
+    --run_name "train_cnndm_BCE_single_moe" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -37,36 +37,38 @@ train_reranker.py \
     --candidate_generation_method "diverse_beam_search+beam_search" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
-    --per_device_train_batch_size 4 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 16 \
-    --num_train_epochs 2 \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 128 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 5 \
     --overwrite_output_dir True \
     --num_pos 1 \
     --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
-    --reduce_type  "single_linear" \
+    --reduce_type  "single_moe" \
     --pooling_type "special" \
     --sub_sampling_ratio 0.1 \
-    --max_train_data_size 100000 \
-    --max_eval_data_size 1000 \
+    --max_train_data_size -1 \
+    --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --using_metrics "rouge1+rouge2+rougeLsum" \
-    --evaluation_strategy "steps" \
-    --save_strategy "steps" \
-    --eval_steps 500 \
-    --save_steps 500 \
-    # --load_checkpoint "./outputs/crosscompare/roberta-large/train_cnndm_BCE_debug_/checkpoint-900" \
-    # --evaluate_before_training True
-    # --max_grad_norm 100 \
-    # --max_grad_norm 100.0 \
+    # --load_checkpoint "outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-13458" \
     # --do_train False \
     # --do_eval False \
     # --do_predict True \
+    # --evaluate_before_training True \
+    # --evaluation_strategy "steps" \
+    # --save_strategy "steps" \
+    # --eval_steps 1000 \
+    # --save_steps 1000 \
+    # --evaluate_before_training True \
+    # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm_BCE_full/checkpoint-2000"
+    # --max_grad_norm 100 \
+    # --max_grad_norm 100.0 \
+    # --do_train False \
+    # --do_predict True \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/train_cnndm_curriculum_error-based_MSE/checkpoint-best" \
-    # --evaluate_before_training True \
-    # --evaluate_before_training True \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
 
 
@@ -89,22 +91,25 @@ train_reranker.py \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 384 \
 #     --candidate_maxlength 128 \
-#     --per_device_train_batch_size 1 \
-#     --per_device_eval_batch_size 1 \
-#     --gradient_accumulation_steps 16 \
-#     --num_train_epochs 5 \
+#     --per_device_train_batch_size 16 \
+#     --per_device_eval_batch_size 4 \
+#     --gradient_accumulation_steps 4 \
+#     --num_train_epochs 1 \
 #     --overwrite_output_dir True \
 #     --loss_type "MoE_BCE" \
 #     --sub_sampling_mode "top_bottom" \
 #     --num_pos 1 \
 #     --num_neg 1 \
 #     --learning_rate 1e-5 \
-#     --max_train_data_size 50000 \
+#     --max_train_data_size -1 \
 #     --max_eval_data_size -1 \
 #     --max_predict_data_size -1 \
 #     --using_metrics "rouge1+rouge2+rougeLsum" \
+#     --load_checkpoint "./outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-best" \
+#     --do_train False \
+#     --do_eval False \
+#     --do_predict True \
 #     # --evaluate_before_training True \
-#     # --load_checkpoint "./outputs/scr/roberta-large/basic_beam_30/checkpoint-1930" \
 
 
 # torchrun \

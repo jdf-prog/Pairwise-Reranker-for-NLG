@@ -6,7 +6,7 @@ from torch import nn
 from transformers.modeling_outputs import BaseModelOutput
 import torch.nn.functional as F
 
-from dualfid.layers import (
+from reranker.layers import (
     MoERegression,
     ModelMultitaskRegression
 )

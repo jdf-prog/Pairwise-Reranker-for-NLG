@@ -95,7 +95,7 @@ args = parser.parse_args()
 dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
 val_data_sizes = [13368, 11332, 4213, 2001, 4018]
 test_data_sizes = [11490, 11334, 4222, 3981, 1497]
-source_max_lengths = [1024, 512, 512, 512, 25] # debug
+source_max_lengths = [1024, 512, 512, 512, 35]
 candidate_max_lengths = [128, 64, 128, 350, 35]
 clean_ns = [True, False, False, False, False]
 length_penalties_pegasus = [0.8, 0.8, 0.6, 0.8, 0.8]
@@ -118,7 +118,7 @@ else:
 
 args.repetition_penalty = repetition_penalties[idx]
 args.no_repeat_ngram_size = no_repeat_ngram_sizes[idx]
-args.cache_dir = "../../hf_models/" + args.model.split('/')[-1] + "/"
+args.cache_dir = "../../hf_models/" + args.model + "/"
 args.prefix = prefix[idx]
 
 print("*"*50)

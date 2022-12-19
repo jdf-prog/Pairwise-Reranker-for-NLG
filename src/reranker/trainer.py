@@ -10,8 +10,8 @@ from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers import EvalPrediction
 from typing import Dict, List, Optional, Tuple, Union, Any
 from torch.utils.data import Dataset
-from dualfid.curriculum import CurriculumSampler
-from dualfid.loss import get_ndcg
+from reranker.curriculum import CurriculumSampler
+from reranker.loss import get_ndcg
 
 logger = logging.getLogger(__name__)
 

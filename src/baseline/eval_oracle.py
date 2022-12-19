@@ -63,12 +63,14 @@ def main(args):
         print("Computing metrics: {}".format(to_score_metrics))
         candidates = load_pkl_candidates(args.dataset, args.set, generation_method, model_name)
         scores = overall_eval(candidates, targets, to_score_metrics, args.num_workers)
-        for k, v in scores.items():
-            save_pkl_cand_scores(args.dataset, args.set, generation_method, model_name, k, v)
+        if args.save_scores:
+            for k, v in scores.items():
+                save_pkl_cand_scores(args.dataset, args.set, generation_method, model_name, k, v)
 
-    ds = load_prepared_dataset(args.dataset, args.set)
+    ds = load_prepared_dataset(args.dataset, args.set, metrics=metrics)
     ds.analyze_oracle()
-    # save_prepared_dataset(args.dataset, args.set, ds)
+    if args.save_prepared:
+        save_prepared_dataset(args.dataset, args.set, ds)
 
 
 
@@ -82,8 +84,9 @@ if __name__ == "__main__":
     parser.add_argument("--overwrite", type=str2bool, default=False)
     # metrics
     parser.add_argument("--metrics", type=str, default="rouge,bleu",
-        help="metrics to compute, support rouge, bleu, bleurt, cider, spice")
-    parser.add_argument("--save", type=str2bool, default=False)
+        help="metrics to compute, support rouge, bleu, bleurt, cider, spice, bleu4")
+    parser.add_argument("--save_scores", type=str2bool, default=True)
+    parser.add_argument("--save_prepared", type=str2bool, default=False)
     args = parser.parse_args()
     args.metrics = args.metrics.split(",")
     print(args)

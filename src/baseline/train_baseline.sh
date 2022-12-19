@@ -63,4 +63,4 @@ train_baseline.py \
     --dataset commongen \
     --model_type t5 \
     --model t5-large \
-    --model_name t5_common_gen \
+    --model_name t5_common_gen_2_half \

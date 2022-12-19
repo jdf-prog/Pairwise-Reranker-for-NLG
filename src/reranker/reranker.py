@@ -10,10 +10,10 @@ import copy
 import random
 import torch.nn.functional as F
 import os
-from dualfid.layers import (
+from reranker.layers import (
     MoE,
 )
-from dualfid.loss import (
+from reranker.loss import (
     infoNCE_loss,
     ListNet_loss,
     ListMLE_loss,
@@ -422,25 +422,22 @@ class CrossCompareReranker(nn.Module):
             nn.Dropout(self.drop_out),
             nn.Linear(1 * self.hidden_size, self.n_tasks),
         )
-        self.single_moe_bottom = nn.Sequential(
+        self.moe_head_layer = nn.Sequential(
+            nn.Linear(2*self.hidden_size, 1*self.hidden_size),
+            nn.ReLU(),
             nn.Linear(1*self.hidden_size, 1*self.hidden_size),
-            nn.Tanh(),
+        )
+        self.single_moe_head_layer = nn.Sequential(
+            nn.Linear(1*self.hidden_size, 1*self.hidden_size),
+            nn.ReLU(),
             nn.Linear(1*self.hidden_size, 1*self.hidden_size),
         )
 
-        # for MOE
-        self.bottom_hidden_size = self.hidden_size
-        # shared bottom
-        self.fc1 = nn.Linear(2*self.hidden_size, self.bottom_hidden_size)
-        self.tanh = nn.Tanh()
-        self.fc2 = nn.Linear(self.bottom_hidden_size, self.hidden_size)
         # MoE
         self.moe = MoE(self.n_tasks, self.hidden_size, self.hidden_size, 2*self.n_tasks, self.hidden_size, k=self.n_tasks)
         # towers - one for each task
         self.towers = nn.ModuleList([nn.Linear(self.hidden_size, 1) for i in range(self.n_tasks)])
         self.sigmoid = nn.Sigmoid()
-        from transformers.models.roberta.modeling_roberta import RobertaLayer
-        self.attention = RobertaLayer(pretrained_model.config)
 
         # parameters for dynamic epochs
         self.args['training_steps'] = self.args.get('training_steps', 0)
@@ -493,6 +490,11 @@ class CrossCompareReranker(nn.Module):
             pred_dif_scores = pred_dif_scores * dif_sign
             dif_scores = torch.abs(dif_scores)
             cls_loss = torch.where(pred_dif_scores > dif_scores, torch.zeros_like(pred_dif_scores), dif_scores - pred_dif_scores).mean()
+        elif self.loss_type == "siamese":
+            # only the top bottom one
+            assert left_pred_scores.shape[0] == 2
+            labels = (left_scores-right_scores > 0).float()
+            cls_loss = F.binary_cross_entropy_with_logits(left_pred_scores, labels)
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
         loss += cls_loss
@@ -576,11 +578,11 @@ class CrossCompareReranker(nn.Module):
             source_cand1_encs = torch.cat([source_encs, cand1_encs], dim=-1)
             source_cand2_encs = torch.cat([source_encs, cand2_encs], dim=-1)
             # MOE
-            source_cand1_encs = self.fc2(self.tanh(self.fc1(source_cand1_encs)))
-            source_cand2_encs = self.fc2(self.tanh(self.fc1(source_cand2_encs)))
+            source_cand1_encs = self.moe_head_layer(source_cand1_encs)
+            source_cand2_encs = self.moe_head_layer(source_cand2_encs)
             source_cand1_preds, cand1_aux_loss = self.moe(source_cand1_encs, train=self.training, collect_gates=not (self.training))
             source_cand2_preds, cand2_aux_loss = self.moe(source_cand2_encs, train=self.training, collect_gates=not (self.training))
-            aux_loss += cand1_aux_loss + cand2_aux_loss
+            aux_loss += (cand1_aux_loss + cand2_aux_loss ) / 2
             # go to towers for different tasks
             left_pred_scores = torch.cat([
                 tower(source_cand1_pred) for source_cand1_pred, tower in zip(source_cand1_preds, self.towers)
@@ -601,10 +603,11 @@ class CrossCompareReranker(nn.Module):
             right_pred_scores = self.single_head_layer(cand2_encs)
         elif reduce_type == "single_moe":
             # MOE
-            cand1_encs = self.single_moe_bottom(cand1_encs)
-            cand2_encs = self.single_moe_bottom(cand2_encs)
+            cand1_encs = self.single_moe_head_layer(cand1_encs)
+            cand2_encs = self.single_moe_head_layer(cand2_encs)
             cand1_preds, cand1_aux_loss = self.moe(cand1_encs, train=self.training, collect_gates=not (self.training))
             cand2_preds, cand2_aux_loss = self.moe(cand2_encs, train=self.training, collect_gates=not (self.training))
+            aux_loss += (cand1_aux_loss + cand2_aux_loss) / 2
             # go to towers for different tasks
             left_pred_scores = torch.cat([
                 tower(cand1_pred) for cand1_pred, tower in zip(cand1_preds, self.towers)
@@ -612,6 +615,15 @@ class CrossCompareReranker(nn.Module):
             right_pred_scores = torch.cat([
                 tower(cand2_pred) for cand2_pred, tower in zip(cand2_preds, self.towers)
             ], dim=-1)
+        elif reduce_type == "cls_moe":
+            cls_encs = self.single_moe_head_layer(source_encs)
+            cls_preds, cls_aux_loss = self.moe(cls_encs, train=self.training, collect_gates=not (self.training))
+            aux_loss += cls_aux_loss
+            cls_pred_scores = torch.cat([
+                tower(cls_pred) for cls_pred, tower in zip(cls_preds, self.towers)
+            ], dim=-1)
+            left_pred_scores = cls_pred_scores
+            right_pred_scores = torch.zeros_like(left_pred_scores)
         else:
             raise NotImplementedError
 
@@ -662,7 +674,6 @@ class CrossCompareReranker(nn.Module):
 
         # compute loss
         loss = torch.tensor(0.0, device=device)
-        loss += aux_loss
         left_pred_scores = left_pred_scores.view(batch_size, n_candidates, -1)
         right_pred_scores = right_pred_scores.view(batch_size, n_candidates, -1)
         left_scores = left_scores.view(batch_size, n_candidates, -1)
@@ -671,6 +682,7 @@ class CrossCompareReranker(nn.Module):
             _loss = self.compute_loss(left_pred_scores[i], right_pred_scores[i], left_scores[i], right_scores[i])
             loss += _loss
         loss /= batch_size
+        loss += aux_loss
 
         preds = left_pred_scores - right_pred_scores
         assert preds.shape == (batch_size, n_candidates, n_task)
@@ -765,6 +777,18 @@ class CrossCompareReranker(nn.Module):
             neg_idx = sorted_idx.gather(1, neg_idx)
             # print(f"pos_idx: {pos_idx}") # debug
             # print(f"neg_idx: {neg_idx}") # debug
+        elif self.sub_sampling_mode == "top_uniform":
+            n_pair = 2 # hard written
+            pos_idx = sorted_idx[:, :1].expand(-1, 2)
+            neg_idx = torch.stack([
+                sorted_idx[:, -1],
+                sorted_idx[:, n_candidates // 2],
+            ], dim = -1)
+        elif self.sub_sampling_mode == "radius":
+            step = n_candidates // (n_pair * 2)
+            filted_sorted_ids = sorted_idx[:, 0::step]
+            pos_idx = filted_sorted_ids[:, :n_pair]
+            neg_idx = filted_sorted_ids[:, -n_pair:]
         else:
             raise ValueError(f"Unknown sampling mode: {self.sub_sampling_mode}")
 
@@ -777,6 +801,8 @@ class CrossCompareReranker(nn.Module):
         left_idx = unique_idx.gather(1, left_idx)
         right_idx = unique_idx.gather(1, right_idx)
 
+
+        # return torch.cat([left_idx, right_idx], dim=1), torch.cat([right_idx, left_idx], dim=1)
         return left_idx, right_idx
 
     def cat_ids(self, ids1, masks1, ids2, masks2, ids3=None, masks3=None):
@@ -786,10 +812,10 @@ class CrossCompareReranker(nn.Module):
         assert ids1.shape[:-1] == ids2.shape[:-1]
         assert ids1.shape[:-1] == ids3.shape[:-1] if ids3 is not None else True
         ori_shape = ids1.shape[:-1]
-        ids1 = ids1.view(-1, ids1.shape[-1])
-        ids2 = ids2.view(-1, ids2.shape[-1])
-        masks1 = masks1.view(-1, masks1.shape[-1])
-        masks2 = masks2.view(-1, masks2.shape[-1])
+        ids1 = ids1.reshape(-1, ids1.shape[-1])
+        ids2 = ids2.reshape(-1, ids2.shape[-1])
+        masks1 = masks1.reshape(-1, masks1.shape[-1])
+        masks2 = masks2.reshape(-1, masks2.shape[-1])
         bz = ids1.shape[0]
         sep_token_idx1 = ids1.eq(self.sep_token_id)
         sep_token_idx2 = ids2.eq(self.sep_token_id)

@@ -24,16 +24,16 @@ from src.common.utils import (
     empty2zero,
     seed_everything
 )
-from src.dualfid.model_util import (
+from src.reranker.model_util import (
     build_reranker,
     build_tokenizer,
     build_collator
 )
-from src.dualfid.data import (
+from src.reranker.data import (
     load_data,
     Dataset
 )
-from src.dualfid.curriculum import (
+from src.reranker.curriculum import (
     CurriculumDataset,
 )
 

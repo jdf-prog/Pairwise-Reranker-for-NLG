@@ -2,7 +2,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:6000:1
 #SBATCH -n 1
 
 
@@ -34,9 +34,9 @@ train_reranker.py \
     --n_candidates 30 \
     --candidate_model "opus_mt" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
-    --source_maxlength 100 \
+    --source_maxlength 112 \
     --candidate_maxlength 200 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 32 \
     --gradient_accumulation_steps 16 \
     --num_train_epochs 5 \
@@ -45,6 +45,8 @@ train_reranker.py \
     --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
+    --reduce_type  "single_moe" \
+    --pooling_type "special" \
     --max_train_data_size -1 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \

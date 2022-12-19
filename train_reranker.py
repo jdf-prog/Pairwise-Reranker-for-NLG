@@ -21,23 +21,23 @@ from src.common.utils import (
     str2bool,
     seed_everything
 )
-from src.dualfid.trainer import (
+from src.reranker.trainer import (
     compute_metrics_for_crosscompare,
     compute_metrics_for_scr
 )
-from src.dualfid.model_util import (
+from src.reranker.model_util import (
     build_reranker,
     build_tokenizer,
     build_collator
 )
-from src.dualfid.data import (
+from src.reranker.data import (
     load_data,
     Dataset
 )
-from src.dualfid.trainer import (
+from src.reranker.trainer import (
     RerankerTrainer,
 )
-from src.dualfid.curriculum import (
+from src.reranker.curriculum import (
     CurriculumDataset,
     CurriculumCallback,
     compute_metrics_for_curriculum
@@ -262,7 +262,8 @@ if __name__ == "__main__":
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
       "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
-      "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint", "simcls"
+      "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint", "simcls",
+
     ], default="BCE")
     parser.add_argument("--pooling_type", type=str, choices=[
         "special", "mean", "attention"
@@ -282,7 +283,8 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_ratio", type=float, default=0.4)
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
-        "importance", "random", "poisson_dynamic", "top_bottom_random"
+        "importance", "random", "poisson_dynamic", "top_bottom_random",
+        "top_uniform", "radius",
     ], default="top_bottom")
     parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)

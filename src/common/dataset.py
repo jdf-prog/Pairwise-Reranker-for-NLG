@@ -354,7 +354,7 @@ class CustomDataset:
                 row.append(f"{top_beam_score:.4f} ({min_score:.4f} - {mean_score:.4f} - {max_score:.4f})")
             rows.append(row)
 
-        rows.sort(key=lambda x: x[0])
+        rows.sort(key=lambda x: x[0]+x[1])
         table.add_rows(rows)
         self.logger.info(f"Oracle Analysis Resutls:\n{table}")
         return table

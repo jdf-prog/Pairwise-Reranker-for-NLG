@@ -2,19 +2,19 @@ import torch
 import os
 import numpy as np
 import torch.nn.functional as F
-from dualfid.reranker import (
+from reranker.reranker import (
     SCR,
     DualReranker,
     CrossCompareReranker,
     DualCompareReranker
 )
-from dualfid.fid import (
+from reranker.fid import (
     DualFiDBART,
     DualFiDT5,
     FiDBART,
     FiDT5,
 )
-from dualfid.collator import (
+from reranker.collator import (
     DualCollator,
     DualCompareCollator,
     DualFiDCollator,

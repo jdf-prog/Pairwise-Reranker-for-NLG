@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import numpy as np
 import math
 
-from dualfid.model_moe import MoE
+from reranker.model_moe import MoE
 from typing import List, Dict, Tuple, Optional, Union
 class ModelMultitaskRegression(nn.Module):
     """

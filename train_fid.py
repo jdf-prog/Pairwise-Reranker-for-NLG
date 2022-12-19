@@ -27,20 +27,20 @@ from src.common.utils import (
     str2bool,
     seed_everything
 )
-from src.dualfid.model_util import (
+from src.reranker.model_util import (
     build_fid,
     build_tokenizer,
     build_collator,
 
 )
-from src.dualfid.data import (
+from src.reranker.data import (
     load_data,
     Dataset
 )
 from src.common.evaluation import (
     overall_eval
 )
-from src.dualfid.trainer import (
+from src.reranker.trainer import (
     FiDTrainer,
 )
 def main(args):

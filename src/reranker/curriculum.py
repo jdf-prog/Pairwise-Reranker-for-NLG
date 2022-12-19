@@ -74,7 +74,7 @@ class CurriculumSampler(Sampler[int]):
         self.num_curriculum = num_curriculum
         self.curriculum_size = len(self.data_source) // self.num_curriculum if curriculum_size is None else curriculum_size
         self.num_curriculum_learned = 0
-        self.indices = np.arange(0, len(self.data_source))
+        self.indices = np.arange(0, min(self.curriculum_size, len(self.data_source)))
 
 
     def __iter__(self) -> Iterator[int]:
@@ -159,10 +159,12 @@ class CurriculumCallback(TrainerCallback):
             right_indices = np.where(~error_indices_flag)[0]
             error_indices = np.array(next_curriculum_indices)[error_indices]
             right_indices = np.array(next_curriculum_indices)[right_indices]
-            error_ratio = self.curriculum_step / train_dataloader.sampler.curriculum_size
+            error_ratio = self.curriculum_step / train_dataloader.sampler.num_curriculum
             right_ratio = 1 - error_ratio
             sub_error_indices = error_indices[:int(len(error_indices) * error_ratio)]
-            sub_right_indices = right_indices[:int(len(right_indices) * right_ratio)]
+            sub_right_indices = right_indices
+            # sub_error_indices = error_indices
+            # sub_right_indices = right_indices[:int(len(right_indices) * right_ratio)]
             selected_indices = np.concatenate([sub_error_indices, sub_right_indices])
             np.random.shuffle(selected_indices)
             print("Select {}/{} error indices for next curriculum".format(len(sub_error_indices), len(error_indices)))

@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --time=10:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=generate_candidates
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --nodelist=ink-lucy
+#SBATCH --gres=gpu:1080:1
 #SBATCH -n 1
 
 nvidia-smi
@@ -63,7 +64,7 @@ nvidia-smi
 
 for set in "val" "test"
 do
-    for method in "top_k_sampling" "top_p_sampling"
+    for method in "top_p_sampling"
     do
         python generate_candidate.py \
         --dataset wmt18 \
@@ -148,7 +149,7 @@ done
 # with model trained on 2-half of the training data
 ######################################################
 
-# for method in "diverse_beam_search" "beam_search"
+# for method in "top_k_sampling" "top_p_sampling"
 # do
 #     python generate_candidate.py \
 #     --dataset commongen \
@@ -159,7 +160,7 @@ done
 #     --load_model_path "../../models/t5_common_gen_2_half/checkpoint-best" \
 #     --partition '1_half' \
 #     --set 'train' \
-#     --inference_bs 10 \
+#     --inference_bs 20 \
 #     --save_candidates True \
 #     --generation_method $method \
 #     --num_return_sequences 15 \

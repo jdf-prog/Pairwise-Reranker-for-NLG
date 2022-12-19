@@ -14,7 +14,7 @@ import torch.nn as nn
 import numpy as np
 import copy
 import torch.nn.functional as F
-from dualfid.wrapper import (
+from reranker.wrapper import (
     FiDEncoderWrapper,
     DualFiDEncoderWrapper,
     DecoderWrapper,

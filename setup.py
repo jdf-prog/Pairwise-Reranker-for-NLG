@@ -15,9 +15,9 @@ with open("requirements.txt", "r") as f:
 
 
 setuptools.setup(
-    name="DualFiD",
+    name="PCR",
     version="0.1.0",
-    description="Dual Encoder Fusion-in-Decoder",
+    description="Pairwise Comparison Reranker",
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
