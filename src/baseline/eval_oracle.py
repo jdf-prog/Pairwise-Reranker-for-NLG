@@ -5,7 +5,6 @@ import argparse
 import sys
 import os
 import psutil
-from tqdm.contrib.concurrent import process_map
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.data import (
@@ -77,16 +76,16 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="cnn_dailymail")
-    parser.add_argument("--set", type=str, default="val")
+    parser.add_argument("--dataset", type=str, default="cnndm")
+    parser.add_argument("--set", type=str, default="test")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--overwrite", type=str2bool, default=False)
     # metrics
     parser.add_argument("--metrics", type=str, default="rouge,bleu",
         help="metrics to compute, support rouge, bleu, bleurt, cider, spice, bleu4")
-    parser.add_argument("--save_scores", type=str2bool, default=True)
-    parser.add_argument("--save_prepared", type=str2bool, default=False)
+    parser.add_argument("--save_scores", type=str2bool, default=True, help="save scores to disk")
+    parser.add_argument("--save_prepared", type=str2bool, default=False, help="save prepared dataset for training")
     args = parser.parse_args()
     args.metrics = args.metrics.split(",")
     print(args)

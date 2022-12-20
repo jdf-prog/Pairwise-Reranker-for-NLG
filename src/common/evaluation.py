@@ -55,9 +55,11 @@ def eval_rouge(
         A dict of rouge scores.
         key is the rouge type, value is the rouge score, in same shape with hypotheses.
     """
+    do_flatten = False
     assert len(hypotheses) == len(references)
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
+            do_flatten = True
             hypotheses[i] = [hypotheses[i]]
     assert set(rouge_types) <= set(['rouge1', 'rouge2', 'rougeL', 'rougeLsum']), "Rouge types should be in ['rouge1', 'rouge2', 'rougeL', 'rougeLsum']"
     scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=True)
@@ -70,7 +72,8 @@ def eval_rouge(
                     rouge_scores[rouge_type][i].append(scores.get(rouge_type).fmeasure)
             pbar.update(1)
     # nested remove list with single element
-    if all([all([len(score) == 1 for score in scores]) for scores in rouge_scores.values()]):
+    if do_flatten:
+        assert all([all([len(score) == 1 for score in scores]) for scores in rouge_scores.values()])
         rouge_scores = {rouge_type: [score[0] for score in scores] for rouge_type, scores in rouge_scores.items()}
     return rouge_scores
 
@@ -88,9 +91,11 @@ def eval_bleu(
     Returns:
         A list of bleu scores, in same shape with hypotheses.
     """
+    do_flatten = False
     assert len(hypotheses) == len(references), f"Length of hypotheses {len(hypotheses)} and references {len(references)} should be the same."
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
+            do_flatten = True
             hypotheses[i] = [hypotheses[i]]
     bleu_scores = []
     with tqdm(total=len(hypotheses), desc="Evaluating bleu") as pbar:
@@ -100,7 +105,8 @@ def eval_bleu(
                 bleu_scores[i].append(sentence_bleu(hypo, [ref]).score)
             pbar.update(1)
     # nested remove list with single element
-    if all([len(score) == 1 for score in bleu_scores]):
+    if do_flatten:
+        assert all([len(score) == 1 for score in bleu_scores])
         bleu_scores = [score[0] for score in bleu_scores]
     return bleu_scores
 
@@ -119,9 +125,11 @@ def eval_bleu4(
         A list of bleu scores, in same shape with hypotheses.
     """
     print("Evaluating bleu4")
+    do_flatten = False
     assert len(hypotheses) == len(references)
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
+            do_flatten = True
             hypotheses[i] = [hypotheses[i]]
 
     # tokenization
@@ -154,7 +162,8 @@ def eval_bleu4(
     bleu4_scores = scores[3]
     bleu4_scores = [[bleu4_scores[hypo_id]*100 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
     # nested remove list with single element
-    if all([len(score) == 1 for score in bleu4_scores]):
+    if do_flatten:
+        assert all([len(score) == 1 for score in bleu4_scores])
         bleu4_scores = [score[0] for score in bleu4_scores]
     return bleu4_scores
 
@@ -169,11 +178,13 @@ def eval_bleurt(
         hypotheses: the hypotheses
         references: the references
     """
+    do_flatten = False
     assert len(hypotheses) == len(references)
     bleurt_scorer = load('bleurt')
     bleurt_scores = []
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
+            do_flatten = True
             hypotheses[i] = [hypotheses[i]]
     with tqdm(total=len(hypotheses), desc="Evaluating bleurt") as pbar:
         for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
@@ -183,7 +194,8 @@ def eval_bleurt(
                 bleurt_scores[i].append(result['scores'][0])
             pbar.update(1)
     # nested remove list with single element
-    if all([len(score) == 1 for score in bleurt_scores]):
+    if do_flatten:
+        assert all([len(score) == 1 for score in bleurt_scores])
         bleurt_scores = [score[0] for score in bleurt_scores]
     return bleurt_scores
 
@@ -199,9 +211,11 @@ def eval_cider(
         references: the references
     """
     print("Evaluating cider")
+    do_flatten = False
     assert len(hypotheses) == len(references)
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
+            do_flatten = True
             hypotheses[i] = [hypotheses[i]]
 
     # tokenization
@@ -231,7 +245,8 @@ def eval_cider(
     score, scores = cider_scorer.compute_score(gts, res)
     cider_scores = [[scores[hypo_id]*10 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
     # nested remove list with single element
-    if all([len(score) == 1 for score in cider_scores]):
+    if do_flatten:
+        assert all([len(score) == 1 for score in cider_scores])
         cider_scores = [score[0] for score in cider_scores]
     return cider_scores
 
@@ -247,9 +262,11 @@ def eval_spice(
         references: the references
     """
     print("Evaluating spice")
+    do_flatten = False
     assert len(hypotheses) == len(references)
     for i in range(len(hypotheses)):
         if isinstance(hypotheses[i], str):
+            do_flatten = True
             hypotheses[i] = [hypotheses[i]]
     # tokenization
     nlp = spacy.load("en_core_web_sm")
@@ -275,9 +292,10 @@ def eval_spice(
             id += 1
 
     score, scores = spice_scorer.compute_score(gts, res)
-    spice_scores = [[scores[hypo_id]['All']['f']*10.0 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
+    spice_scores = [[scores[hypo_id]['All']['f']*100.0 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
     # nested remove list with single element
-    if all([len(score) == 1 for score in spice_scores]):
+    if do_flatten:
+        assertall([len(score) == 1 for score in spice_scores])
         spice_scores = [score[0] for score in spice_scores]
     return spice_scores
 

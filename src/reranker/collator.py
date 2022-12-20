@@ -141,10 +141,7 @@ class DualCollator(object):
         batch_source = [self.source_prefix + s for s in batch_source]
         batch_candidates = [[self.candidate_prefix + c for c in cands] for cands in batch_candidates]
         batch_target = [self.candidate_prefix + t for t in batch_target]
-        # truncate
-        batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
-        batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
-        batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
+
         # tokenize
         encoded_source_ids, encoded_source_masks = encode_texts(batch_source, self.tokenizer, self.source_maxlength) # source
         encoded_target_ids, encoded_target_masks = encode_texts(batch_target, self.tokenizer, self.candidate_maxlength) # target

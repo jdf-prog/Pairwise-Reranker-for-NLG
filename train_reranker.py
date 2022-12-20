@@ -203,6 +203,8 @@ def main(args):
         if args.report_to == "wandb":
             wandb.init(project="Reranker", group=args.reranker_type, name=args.run_name)
             wandb.config.update(args)
+        else:
+            os.environ["WANDB_DISABLED"] = 'true'
 
         if args.evaluate_before_training:
             metrics = trainer.evaluate()
@@ -337,7 +339,7 @@ if __name__ == "__main__":
     parser.add_argument("--logging_steps", type=int, default=5)
     parser.add_argument("--log_level", type=str, default="passive",
         choices=["passive", "info", "debug", "warning", "error", "critical"])
-    parser.add_argument("--report_to", type=str, default=None)
+    parser.add_argument("--report_to", type=str, default='none')
     parser.add_argument("--run_name", type=str, default="basic") # wandb run name
 
 

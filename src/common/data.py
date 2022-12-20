@@ -20,7 +20,7 @@ def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=Fals
     Returns:
         sources: the list of sources
         targets: the list of targets
-        offsets: the offsets of the cut points
+        offsets(Optional): the offsets of the cut points
     """
     assert set_name in ['train', 'val', 'test']
     assert partition is None or partition in ['1_half', '2_half', 'full']

@@ -22,7 +22,8 @@ class RerankerTrainer(Trainer):
     ) -> Dict[str, float]:
         metrics = super().evaluate(**kwargs)
         if self.is_world_process_zero():
-            wandb.log(metrics)
+            if "wandb" == self.args.report_to or "wandb" in self.args.report_to:
+                wandb.log(metrics)
         return metrics
 
     def save_model(self, output_dir: Optional[str] = None, **kwargs):

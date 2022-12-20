@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --time=10:00:00
-#SBATCH --job-name=bash
+#SBATCH --job-name=eval_oracle
 #SBATCH --output ../../jobs/%j.out
 #SBATCH --cpus-per-task=1
 
@@ -14,7 +14,7 @@
 #     --dataset xsum \
 #     --set test \
 #     --metrics "rouge" \
-#     --num_workers 2 \
+#     --num_workers 1 \
 
 # python eval_oracle.py \
 #     --dataset wmt18 \
@@ -22,8 +22,29 @@
 #     --metrics "bleu" \
 #     --num_workers 1 \
 
+# python eval_oracle.py \
+#     --dataset commongen \
+#     --set val \
+#     --metrics "bleu,cider" \
+#     --num_workers 1 \
+
+# python eval_oracle.py \
+#     --dataset commongen_gpt3 \
+#     --set val \
+#     --metrics "bleu,cider" \
+#     --num_workers 1 \
+# #     --overwrite True \
+# #     --save_prepared True \
+
 python eval_oracle.py \
-    --dataset commongen \
-    --set val \
-    --metrics "bleu4,cider,spice" \
-    --num_workers 1 \
+    --dataset wmt18_gpt3 \
+    --set test \
+    --metrics "bleu" \
+    --overwrite True \
+    --save_prepared True \
+
+# python eval_oracle.py \
+#     --dataset cnndm_gpt3 \
+#     --set test \
+#     --metrics "rouge" \
+#     --num_workers 1 \

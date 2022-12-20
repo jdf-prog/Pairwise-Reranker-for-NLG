@@ -15,3 +15,4 @@ datasets
 evaluate
 sacrebleu
 spacy
+openai
