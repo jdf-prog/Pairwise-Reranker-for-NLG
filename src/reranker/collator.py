@@ -71,7 +71,6 @@ class SCRCollator(object):
         self.sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else tokenizer.eos_token
         self.cls_token = tokenizer.cls_token if tokenizer.cls_token is not None else tokenizer.bos_token
         assert self.sep_token is not None, 'sep_token is not found in the tokenizer'
-        self.sep_token = "[SEP]" # debug
         self.separate_token = self.sep_token
         self.target_maxlength = self.candidate_maxlength
         self.source_prefix = source_prefix if source_prefix is not None else "<source>"

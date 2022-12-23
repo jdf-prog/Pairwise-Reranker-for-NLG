@@ -271,7 +271,7 @@ if __name__ == '__main__':
 
     # default config
     dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
-    source_max_lengths = [1024, 512, 512, 512, 25] # debug
+    source_max_lengths = [1024, 512, 512, 512, 25]
     target_max_lengths = [128, 64, 128, 350, 30]
     lr = [5e-5, 5e-5, 1e-4, 5e-5, 5e-5]
     prefix = [None, None, None, "Translate Chinese to English: ", "Generate a sentence with the following words: "]
