@@ -18,7 +18,7 @@ def build_tokenizer(args):
     else:
         from transformers import AutoTokenizer
         print(f"\nUsing {args.model_type.upper()} tokenizer")
-        tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir = args.cache_dir)
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
     return tokenizer
 
 def build_model(args):

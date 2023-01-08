@@ -401,7 +401,8 @@ class CrossCompareReranker(nn.Module):
         self.drop_out = self.args.get("drop_out", 0.05)
         self.pooling_type = self.args.get("pooling_type", "special")
         self.reduce_type = self.args.get("reduce_type", "single_linear")
-
+        self.inference_mode = self.args.get("inference_mode", "bubble")
+        self.num_bubble_runs = self.args.get("num_bubble_runs", 1)
         # LM
         self.pretrained_model = pretrained_model
         self.hidden_size = pretrained_model.config.hidden_size
@@ -877,6 +878,257 @@ class CrossCompareReranker(nn.Module):
         cat_masks = cat_masks.reshape(ori_shape + (-1,))
         return cat_ids, cat_masks
 
+    def _bubble_predict(
+        self,
+        source_ids,
+        source_attention_mask,
+        candidate_ids,
+        candidate_attention_mask,
+        scores,
+        num_runs=1,
+    ):
+        """
+            bubble prediction
+        """
+        device = source_ids.device
+        outputs = {}
+        batch_size, src_len = source_ids.shape
+        batch_size, n_candidates, cand_len = candidate_ids.shape
+        num_runs = n_candidates if num_runs < 0 else num_runs
+        num_runs = np.clip(num_runs, 1, n_candidates)
+
+        sorted_idx = torch.argsort(scores.mean(-1), dim=1, descending=True) # [batch_size, n_candidates]
+        ranks = torch.zeros_like(sorted_idx)
+        ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidates, device=device)
+        permu = torch.randperm(n_candidates).repeat(batch_size, 1).to(device) # [batch_size, n_candidates] random
+        loss = torch.tensor(0.0).to(device)
+        initial_idx = permu[:, 0].clone()
+        cur_idxs = []
+        next_idxs = []
+        better_idxs = []
+        ranks_acc_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
+        ranks_consistency_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
+        cand1_prefix_ids = torch.tensor(self.tokenizer.cand1_prefix_id).to(device)
+        cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, 1)
+        cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
+        cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, 1)
+        for i in range(num_runs):
+            for j in range(i, n_candidates-1):
+                cur_idx = permu[:, j].clone()
+                next_idx = permu[:, j+1].clone() # [batch_size]
+                batch_idx = torch.arange(batch_size).to(device)
+                left_cand_ids = candidate_ids[batch_idx, cur_idx]
+                right_cand_ids = candidate_ids[batch_idx, next_idx]
+                left_cand_attention_mask = candidate_attention_mask[batch_idx, cur_idx]
+                right_cand_attention_mask = candidate_attention_mask[batch_idx, next_idx]
+                left_scores = scores[batch_idx, cur_idx]
+                right_scores = scores[batch_idx, next_idx]
+                # left-right
+                left_cand_ids[:,0] = cand1_prefix_ids[:,0]
+                right_cand_ids[:,0] = cand2_prefix_ids[:,0]
+                candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                    source_ids,
+                    source_attention_mask,
+                    left_cand_ids,
+                    left_cand_attention_mask,
+                    right_cand_ids,
+                    right_cand_attention_mask)
+                _outputs = self._forward(
+                    candidate_pair_ids,
+                    candidate_pair_attention_mask,
+                    left_scores,
+                    right_scores,
+                )
+                loss += _outputs['loss']
+                preds = _outputs['preds']
+                # right-left
+                left_cand_ids[:,0] = cand2_prefix_ids[:,0]
+                right_cand_ids[:,0] = cand1_prefix_ids[:,0]
+                candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                    source_ids,
+                    source_attention_mask,
+                    right_cand_ids,
+                    right_cand_attention_mask,
+                    left_cand_ids,
+                    left_cand_attention_mask)
+                _outputs = self._forward(
+                    candidate_pair_ids,
+                    candidate_pair_attention_mask,
+                    right_scores,
+                    left_scores,
+                )
+                loss += _outputs['loss']
+                preds_inv = -_outputs['preds']
+
+                consistency = ((preds * preds_inv) > 0).float()
+
+                # NOTE: compute distribution of the accuracy with different ranks
+                oracle_compare_result = scores[torch.arange(batch_size), cur_idx] - scores[torch.arange(batch_size), next_idx]
+                oracle_compare_result = oracle_compare_result.mean(dim=-1)
+                pair_dif_ranks = ranks[torch.arange(batch_size), cur_idx] - ranks[torch.arange(batch_size), next_idx]
+                pair_dif_ranks = torch.abs(pair_dif_ranks)
+                for bz in range(batch_size):
+                    if (preds[bz]) * oracle_compare_result[bz] > 0:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
+                    if (preds_inv[bz]) * oracle_compare_result[bz] > 0:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
+                    if consistency[bz] > 0:
+                        ranks_consistency_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_consistency_dist[bz, pair_dif_ranks[bz], 1] += 1
+
+                permu[:, j] = torch.where(preds + preds_inv <= 0, cur_idx, next_idx)
+                permu[:, j+1] = torch.where(preds + preds_inv > 0, cur_idx, next_idx)
+                assert torch.ne(permu[:, j], permu[:, j+1]).all()
+                better_idx = permu[:, j+1].clone()
+                better_idxs.append(better_idx)
+                next_idxs.append(next_idx)
+                cur_idxs.append(cur_idx)
+
+        outputs = {}
+        outputs['loss'] = loss / 2
+        outputs["select_process"] = []
+        outputs["select_process"].append(torch.stack(cur_idxs, dim=1))
+        outputs["select_process"].append(torch.stack(next_idxs, dim=1))
+        outputs["select_process"].append(torch.stack(better_idxs, dim=1))
+        outputs["select_process"] = torch.stack(outputs["select_process"], dim=1) # [batch_size, 3, n_candidates]
+        outputs["ranks_acc_dist"] = ranks_acc_dist # [batch_size, n_candidates, 2]
+        outputs["ranks_consistency_dist"] = ranks_consistency_dist # [batch_size, n_candidates, 2]
+        outputs["loss"] /= outputs['select_process'].shape[-1]
+
+        return outputs
+
+    def _full_predict(
+        self,
+        source_ids,
+        source_attention_mask,
+        candidate_ids,
+        candidate_attention_mask,
+        scores,
+    ):
+        device = source_ids.device
+        outputs = {}
+        batch_size, src_len = source_ids.shape
+        batch_size, n_candidates, cand_len = candidate_ids.shape
+
+        sorted_idx = torch.argsort(scores.mean(-1), dim=1, descending=True) # [batch_size, n_candidates]
+        ranks = torch.zeros_like(sorted_idx)
+        ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidates, device=device)
+        permu = torch.randperm(n_candidates).repeat(batch_size, 1).to(device) # [batch_size, n_candidates] random
+        loss = torch.tensor(0.0).to(device)
+        ranks_acc_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
+        ranks_consistency_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
+        cand1_prefix_ids = torch.tensor(self.tokenizer.cand1_prefix_id).to(device)
+        cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, 1)
+        cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
+        cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, 1)
+
+        compare_results = torch.zeros(batch_size, n_candidates, n_candidates, device=device)
+        for i in range(n_candidates):
+            for j in range(n_candidates):
+                if i == j:
+                    continue
+                left_cand_ids = candidate_ids[:, i]
+                right_cand_ids = candidate_ids[:, j]
+                left_cand_attention_mask = candidate_attention_mask[:, i]
+                right_cand_attention_mask = candidate_attention_mask[:, j]
+                left_scores = scores[:, i]
+                right_scores = scores[:, j]
+                left_cand_ids[:,0] = cand1_prefix_ids[:,0]
+                right_cand_ids[:,0] = cand2_prefix_ids[:,0]
+                candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
+                    source_ids,
+                    source_attention_mask,
+                    left_cand_ids,
+                    left_cand_attention_mask,
+                    right_cand_ids,
+                    right_cand_attention_mask)
+                _outputs = self._forward(
+                    candidate_pair_ids,
+                    candidate_pair_attention_mask,
+                    left_scores,
+                    right_scores,
+                )
+                loss += _outputs['loss']
+                preds = _outputs['preds']
+                compare_results[:, i, j] = preds
+
+        # compute consistency and accuracy
+        for i in range(n_candidates):
+            for j in range(i+1, n_candidates):
+                if i == j:
+                    continue
+                oracle_compare_result = scores[:, i] - scores[:, j]
+                oracle_compare_result = oracle_compare_result.mean(dim=-1)
+                pair_dif_ranks = torch.abs(ranks[:, i] - ranks[:, j])
+                for bz in range(batch_size):
+                    if (compare_results[bz, i, j]) * oracle_compare_result[bz] > 0:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
+                    if compare_results[bz, j, i] * oracle_compare_result[bz] < 0:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
+                    if compare_results[bz, i, j] * compare_results[bz, j, i] <= 0:
+                        ranks_consistency_dist[bz, pair_dif_ranks[bz], 0] += 1
+                    else:
+                        ranks_consistency_dist[bz, pair_dif_ranks[bz], 1] += 1
+
+        outputs['loss'] = loss / (n_candidates * (n_candidates - 1))
+        outputs['preds'] = compare_results # [batch_size, n_candidates, n_candidates]
+        outputs["ranks_acc_dist"] = ranks_acc_dist # [batch_size, n_candidates, 2]
+        outputs["ranks_consistency_dist"] = ranks_consistency_dist # [batch_size, n_candidates, 2]
+
+        return outputs
+
+    def predict(
+        self,
+        source_ids,
+        source_attention_mask,
+        candidate_ids,
+        candidate_attention_mask,
+        scores,
+        mode=None,
+    ):
+        """
+            Do predict over each group of candidates
+        Args:
+            always:
+                source_ids: [batch_size, src_len]
+                source_attention_mask: [batch_size, src_len]
+                candidate_ids: [batch_size, n_candidates, cand_len]
+                candidate_attention_mask: [batch_size, n_candidates, cand_len]
+                scores: [batch_size, n_candidates, n_tasks]
+        """
+        device = source_ids.device
+        outputs = {}
+        mode = mode or self.inference_mode
+        if mode == "bubble":
+            outputs = self._bubble_predict(
+                source_ids,
+                source_attention_mask,
+                candidate_ids,
+                candidate_attention_mask,
+                scores,
+                num_runs=self.num_bubble_runs
+            )
+        elif mode == "full":
+            outputs = self._full_predict(
+                source_ids,
+                source_attention_mask,
+                candidate_ids,
+                candidate_attention_mask,
+                scores,
+            )
+        else:
+            raise NotImplementedError
+        return outputs
+
     def forward(
         self,
         source_ids,
@@ -988,106 +1240,13 @@ class CrossCompareReranker(nn.Module):
                     right_scores,
                 )
             else:
-                batch_size, n_candidates, cand_len = candidate_ids.shape
-                sorted_idx = torch.argsort(scores.mean(-1), dim=1, descending=True) # [batch_size, n_candidates]
-                ranks = torch.zeros_like(sorted_idx)
-                ranks[torch.arange(batch_size).unsqueeze(1), sorted_idx] = torch.arange(n_candidates, device=device)
-
-                permu = torch.randperm(n_candidates).repeat(batch_size, 1).to(device) # [batch_size, n_candidates] random
-
-                cur_idx = permu[:, 0]
-                loss = torch.tensor(0.0).to(device)
-                initial_idx = cur_idx
-                next_idxs = []
-                better_idxs = []
-                ranks_acc_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
-                ranks_consistency_dist = torch.zeros(batch_size, n_candidates, 2, device=device)
-                cand1_prefix_ids = torch.tensor(self.tokenizer.cand1_prefix_id).to(device)
-                cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, 1)
-                cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
-                cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, 1)
-                for i in range(1, n_candidates):
-                    next_idx = permu[:, i] # [batch_size]
-                    batch_idx = torch.arange(batch_size).to(device)
-                    left_cand_ids = candidate_ids[batch_idx, cur_idx]
-                    right_cand_ids = candidate_ids[batch_idx, next_idx]
-                    left_cand_attention_mask = candidate_attention_mask[batch_idx, cur_idx]
-                    right_cand_attention_mask = candidate_attention_mask[batch_idx, next_idx]
-                    left_scores = scores[batch_idx, cur_idx]
-                    right_scores = scores[batch_idx, next_idx]
-                    # left-right
-                    left_cand_ids[:,0] = cand1_prefix_ids[:,0]
-                    right_cand_ids[:,0] = cand2_prefix_ids[:,0]
-                    candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
-                        source_ids,
-                        source_attention_mask,
-                        left_cand_ids,
-                        left_cand_attention_mask,
-                        right_cand_ids,
-                        right_cand_attention_mask)
-                    _outputs = self._forward(
-                        candidate_pair_ids,
-                        candidate_pair_attention_mask,
-                        left_scores,
-                        right_scores,
-                    )
-                    loss += _outputs['loss']
-                    preds = _outputs['preds']
-                    # right-left
-                    left_cand_ids[:,0] = cand2_prefix_ids[:,0]
-                    right_cand_ids[:,0] = cand1_prefix_ids[:,0]
-                    candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
-                        source_ids,
-                        source_attention_mask,
-                        right_cand_ids,
-                        right_cand_attention_mask,
-                        left_cand_ids,
-                        left_cand_attention_mask)
-                    _outputs = self._forward(
-                        candidate_pair_ids,
-                        candidate_pair_attention_mask,
-                        right_scores,
-                        left_scores,
-                    )
-                    loss += _outputs['loss']
-                    preds_inv = -_outputs['preds']
-
-                    consistency = ((preds * preds_inv) > 0).float()
-
-                    # NOTE: compute distribution of the accuracy with different ranks
-                    oracle_compare_result = scores[torch.arange(batch_size), cur_idx] - scores[torch.arange(batch_size), next_idx]
-                    oracle_compare_result = oracle_compare_result.mean(dim=-1)
-                    pair_dif_ranks = ranks[torch.arange(batch_size), cur_idx] - ranks[torch.arange(batch_size), next_idx]
-                    pair_dif_ranks = torch.abs(pair_dif_ranks)
-                    for bz in range(batch_size):
-                        if (preds[bz]) * oracle_compare_result[bz] > 0:
-                            ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
-                        else:
-                            ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
-                        if (preds_inv[bz]) * oracle_compare_result[bz] > 0:
-                            ranks_acc_dist[bz, pair_dif_ranks[bz], 0] += 1
-                        else:
-                            ranks_acc_dist[bz, pair_dif_ranks[bz], 1] += 1
-                        if consistency[bz] > 0:
-                            ranks_consistency_dist[bz, pair_dif_ranks[bz], 0] += 1
-                        else:
-                            ranks_consistency_dist[bz, pair_dif_ranks[bz], 1] += 1
-
-                    better_idx = torch.where(preds + preds_inv > 0, cur_idx, next_idx)
-                    # better_idx = torch.where(cand1_sim >= cand2_sim, cur_idx, next_idx)
-                    better_idxs.append(better_idx)
-                    next_idxs.append(next_idx)
-                    cur_idx = better_idx
-                outputs = {}
-                outputs['loss'] = loss / (n_candidates - 1) / 2
-                outputs["select_process"] = []
-                outputs["select_process"].append(torch.stack([initial_idx] + better_idxs[:-1], dim=1))
-                outputs["select_process"].append(torch.stack(next_idxs, dim=1))
-                outputs["select_process"].append(torch.stack(better_idxs, dim=1))
-                outputs["select_process"] = torch.stack(outputs["select_process"], dim=1) # [batch_size, 3, n_candidates]
-                outputs["ranks_acc_dist"] = ranks_acc_dist # [batch_size, n_candidates, 2]
-                outputs["ranks_consistency_dist"] = ranks_consistency_dist # [batch_size, n_candidates, 2]
-                assert outputs["select_process"].shape == (batch_size, 3, n_candidates-1), outputs["select_process"].shape
+                outputs = self.predict(
+                    source_ids,
+                    source_attention_mask,
+                    candidate_ids,
+                    candidate_attention_mask,
+                    scores,
+                )
 
         return outputs
 

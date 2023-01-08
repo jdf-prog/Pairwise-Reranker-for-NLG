@@ -183,10 +183,14 @@ def load_prepared_dataset(dataset_name, set_name, models:list=None, generation_m
 
     if models == None:
         models = list(set([t[0] for t in cur_types]))
+        models.sort()
     if generation_methods == None:
         generation_methods = list(set([t[1] for t in cur_types]))
+        generation_methods.sort()
     for model, generation_method in itertools.product(models, generation_methods):
-        assert (model, generation_method) in cur_types, f"{model} {generation_method} not in {cur_types}"
+        if (model, generation_method) not in cur_types:
+            print(f"Warning: {model} {generation_method} not found in {cur_types}")
+            continue
         cur_metrics = get_candidate_metrics(dataset_name, set_name, model, generation_method)
         candidates = load_pkl_candidates(dataset_name, set_name, generation_method, model)
         scores = {}

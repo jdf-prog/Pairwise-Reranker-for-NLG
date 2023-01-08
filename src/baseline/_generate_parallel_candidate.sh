@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --time=10:00:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=generate_parallel_candidates
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2080:1
 #SBATCH -n 1
 
 

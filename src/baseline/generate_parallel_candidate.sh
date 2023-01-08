@@ -15,13 +15,13 @@
 dataset=cnndm
 model_type=pegasus
 model=google/pegasus-large
-model_name="pegasus_cnndm_2_half"
+model_name="pegasus_cnndm_half"
 load_model=True
-load_model_path="../../models/pegasus_cnndm_2_half/checkpoint-best"
+load_model_path="../../models/pegasus_cnndm_1_half/checkpoint-best"
 set='train'
-partition='1_half'
-inference_bs=15
-generation_method="beam_search"
+partition='2_half'
+inference_bs=2
+generation_method="top_p_sampling"
 
 num_shards=15
 shard_size=10000

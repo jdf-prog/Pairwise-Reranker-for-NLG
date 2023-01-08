@@ -66,11 +66,14 @@ def main(args):
         dataset = dataset["train"]
         if 'wmt' in args.dataset:
             slang, tlang = args.data_version.split('-')
-            sources = [d[slang] for d in dataset['translation']][:args.max_size]
-            targets = [d[tlang] for d in dataset['translation']][:args.max_size]
+            sources = [d[slang] for d in dataset['translation']]
+            targets = [d[tlang] for d in dataset['translation']]
         else:
-            sources = [x[args.source_key] for x in dataset][:args.max_size]
-            target = [x[args.target_key] for x in dataset][:args.max_size]
+            sources = [x[args.source_key] for x in dataset]
+            target = [x[args.target_key] for x in dataset]
+        ids = np.random.permutation(len(sources))[:(args.max_size)]
+        sources = [sources[i] for i in ids]
+        target = [target[i] for i in ids]
         sources = process_sources(sources)
 
 

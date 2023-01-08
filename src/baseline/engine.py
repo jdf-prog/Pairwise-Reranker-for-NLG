@@ -15,7 +15,7 @@ def get_candidates(tokenizer, val_loader, model, device, args, **kwargs):
     val_labels = []
     base_model = model.pretrained_model
 
-    for idx, batch in tqdm(enumerate(val_loader)):
+    for idx, batch in tqdm(enumerate(val_loader), total=len(val_loader)):
         for k in batch["source_inputs"].keys():
             batch["source_inputs"][k] = batch["source_inputs"][k].to(device)
             if len(batch["source_inputs"][k].shape) > 2:

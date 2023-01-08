@@ -122,6 +122,8 @@ def compute_metrics_for_scr(eval_pred: EvalPrediction) -> Dict[str, float]:
         metrics["oracle"]["metric{}".format(i+1)] = np.mean(oracle_sel_scores[:, i])
     return metrics
 
+
+
 def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, float]:
     """
     Compute metrics for the model.
@@ -129,37 +131,26 @@ def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, flo
 
     """
     preds, labels = eval_pred # scores [batch_size, n_candidates, n_tasks]
-    select_process, ranks_acc_dist, ranks_consistency_dist = preds
+    logits, ranks_acc_dist, ranks_consistency_dist = preds
     scores = labels # [batch_size, n_candidates, n_tasks]
     # scores = scores[:, :-1] # debug
     mean_scores = np.mean(scores, axis=-1) # [batch_size, n_candidates]
     batch_size, n_candidates, n_tasks = scores.shape
-    # compute accuracy
-    accs = []
-    for i in range(n_candidates - 1):
-        cur_idx = select_process[:, 0, i]
-        next_idx = select_process[:, 1, i]
-        pred_better_idx = select_process[:, 2, i]
-        # print(cur_idx)
-        # print(next_idx)
-        cur_scores = mean_scores[np.arange(batch_size), cur_idx]
-        next_scores = mean_scores[np.arange(batch_size), next_idx]
-        pred_better_scores = mean_scores[np.arange(batch_size), pred_better_idx]
-        better_scores = np.maximum(cur_scores, next_scores)
-        # print(cur_scores)
-        # print(mean_scores[np.arange(batch_size), next_idx])
-        # print(pred_better_scores)
-        accs.append(np.mean((pred_better_scores == better_scores)))
-        cur_idx = next_idx
-    accs = np.array(accs)
-    pred_best_idx = select_process[:, 2, -1]
+    # get the predicted best index
+    if logits.shape[1] == 3:
+        pred_best_idx = logits[:, 2, -1]
+    elif logits.shape == (batch_size, n_candidates, n_candidates):
+        b_logits = logits > 0
+        pred_best_idx = np.argmax(np.sum(b_logits, axis=-1), axis=-1)
+    else:
+        raise ValueError("Invalid logits shape: {}".format(logits.shape))
 
     # metric_scores, denormalized these scores
     pred_best_scores = scores[np.arange(batch_size), pred_best_idx]
     oracle_best_scores = scores[np.arange(batch_size), np.argmax(mean_scores, axis=-1)]
-
+    sel_acc = np.sum(ranks_acc_dist[:,:,0], dtype=np.int32).item() / np.sum(ranks_acc_dist, dtype=np.int32).item()
     metrics = {
-        "sel": {"acc": np.mean(accs)},
+        "sel": {"acc": sel_acc},
         "oracle": {},
         "top_beam": {},
         "gain": {},

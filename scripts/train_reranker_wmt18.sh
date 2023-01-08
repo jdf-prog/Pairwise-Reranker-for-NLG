@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --time=4:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --nodelist=ink-titan
-#SBATCH --gres=gpu:2
+#SBATCH --nodelist=ink-lucy
+#SBATCH --gres=gpu:1080:1
 #SBATCH -n 1
 
 
@@ -23,18 +23,18 @@ torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint="localhost:${localhost}" \
     --nnodes 1 \
-    --nproc_per_node 2 \
+    --nproc_per_node 1 \
 train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "deberta" \
     --model_name "microsoft/deberta-v3-large" \
-    --run_name "train_wmt18_linear" \
+    --run_name "train_wmt18_linear_4_method" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
-    --n_candidates 30 \
+    --n_candidates 60 \
     --candidate_model "opus_mt" \
-    --candidate_generation_method "diverse_beam_search+beam_search" \
+    --candidate_generation_method "diverse_beam_search+beam_search+top_k_sampling+top_p_sampling" \
     --source_maxlength 112 \
     --candidate_maxlength 200 \
     --per_device_train_batch_size 16 \
@@ -52,10 +52,10 @@ train_reranker.py \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --using_metrics "bleu" \
-    # --do_train False \
-    # --do_eval False \
-    # --do_predict True \
-    # --load_checkpoint "outputs/crosscompare/microsoft/deberta-v3-large/train_wmt18_linear/checkpoint-best" \
+    --do_train False \
+    --do_eval False \
+    --do_predict True \
+    --load_checkpoint "outputs/crosscompare/microsoft/deberta-v3-large/train_wmt18_linear/checkpoint-best" \
     # --evaluate_before_training True \
     # --do_predict False \
     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
@@ -75,8 +75,8 @@ train_reranker.py \
 #     --nproc_per_node 1 \
 # train_reranker.py \
 #     --reranker_type "scr" \
-#     --model_type "xlm-roberta" \
-#     --model_name "xlm-roberta-large" \
+#     --model_type "deberta" \
+#     --model_name "microsoft/deberta-v3-large" \
 #     --run_name "train_wmt18_SummaReranker" \
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \

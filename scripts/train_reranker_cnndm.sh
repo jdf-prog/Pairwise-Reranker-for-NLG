@@ -1,9 +1,8 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:1
-#SBATCH --qos=general-8000
+#SBATCH --gres=gpu:6000:2
 #SBATCH -n 1
 
 
@@ -23,12 +22,12 @@ torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint="localhost:${localhost}" \
     --nnodes 1 \
-    --nproc_per_node 1 \
+    --nproc_per_node 2 \
 train_reranker.py \
     --reranker_type "crosscompare" \
-    --model_type "roberta" \
-    --model_name "roberta-large" \
-    --run_name "train_cnndm_BCE_single_moe" \
+    --model_type "deberta" \
+    --model_name "microsoft/deberta-v3-large" \
+    --run_name "train_cnndm_full_comparison" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -38,7 +37,7 @@ train_reranker.py \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 128 \
+    --per_device_eval_batch_size 64 \
     --gradient_accumulation_steps 4 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
@@ -46,17 +45,18 @@ train_reranker.py \
     --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
-    --reduce_type  "single_moe" \
+    --reduce_type  "single_linear" \
     --pooling_type "special" \
     --sub_sampling_ratio 0.1 \
     --max_train_data_size -1 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --using_metrics "rouge1+rouge2+rougeLsum" \
-    # --load_checkpoint "outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-13458" \
-    # --do_train False \
-    # --do_eval False \
-    # --do_predict True \
+    --do_train False \
+    --do_eval False \
+    --do_predict True \
+    --load_checkpoint "./outputs/crosscompare/microsoft/deberta-v3-large/trian_cnndm_BCE_single_linear/checkpoint-best" \
+    --inference_mode "full" \
     # --evaluate_before_training True \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
@@ -68,7 +68,6 @@ train_reranker.py \
     # --max_grad_norm 100.0 \
     # --do_train False \
     # --do_predict True \
-    # --load_checkpoint "./outputs/crosscompare/roberta-large/train_cnndm_curriculum_error-based_MSE/checkpoint-best" \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
 
 
@@ -77,12 +76,12 @@ train_reranker.py \
 #     --rdzv_backend=c10d \
 #     --rdzv_endpoint="localhost:${localhost}" \
 #     --nnodes 1 \
-#     --nproc_per_node 1 \
+#     --nproc_per_node 4 \
 # train_reranker.py \
 #     --reranker_type "scr" \
-#     --model_type "roberta" \
-#     --model_name "roberta-large" \
-#     --run_name "train_cnndm_MoE_BCE" \
+#     --model_type "deberta" \
+#     --model_name "microsoft/deberta-v3-large" \
+#     --run_name "train_cnndm_SummaReranker" \
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \
@@ -91,10 +90,10 @@ train_reranker.py \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 384 \
 #     --candidate_maxlength 128 \
-#     --per_device_train_batch_size 16 \
+#     --per_device_train_batch_size 8 \
 #     --per_device_eval_batch_size 4 \
-#     --gradient_accumulation_steps 4 \
-#     --num_train_epochs 1 \
+#     --gradient_accumulation_steps 2 \
+#     --num_train_epochs 5 \
 #     --overwrite_output_dir True \
 #     --loss_type "MoE_BCE" \
 #     --sub_sampling_mode "top_bottom" \
@@ -105,10 +104,10 @@ train_reranker.py \
 #     --max_eval_data_size -1 \
 #     --max_predict_data_size -1 \
 #     --using_metrics "rouge1+rouge2+rougeLsum" \
-#     --load_checkpoint "./outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-best" \
-#     --do_train False \
-#     --do_eval False \
-#     --do_predict True \
+#     # --do_train False \
+#     # --do_eval False \
+#     # --do_predict True \
+#     # --load_checkpoint "./outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-best" \
 #     # --evaluate_before_training True \
 
 

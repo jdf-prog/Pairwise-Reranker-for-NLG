@@ -103,6 +103,8 @@ def main(args):
         "n_candidates": args.n_candidates,
         "pooling_type": args.pooling_type,
         "reduce_type": args.reduce_type,
+        "inference_mode": args.inference_mode,
+        "num_bubble_runs": args.num_bubble_runs,
     }
     if args.load_checkpoint:
         # config = torch.load(os.path.join(args.load_checkpoint, "config.bin"))
@@ -342,7 +344,6 @@ if __name__ == "__main__":
     parser.add_argument("--report_to", type=str, default='none')
     parser.add_argument("--run_name", type=str, default="basic") # wandb run name
 
-
     # save config
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--overwrite_output_dir", type=str2bool, default=False)
@@ -356,6 +357,11 @@ if __name__ == "__main__":
     parser.add_argument("--load_best_model_at_end", type=str2bool, default=True)
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--metric_for_best_model", type=str, default="dev_score")
+
+    # inference config
+    parser.add_argument("--inference_mode", type=str, default="bubble",
+        choices=["bubble", "full"])
+    parser.add_argument("--num_bubble_runs", type=int, default=1)
 
     # curriculum learning
     parser.add_argument("--curriculum_learning", type=str, default=None,

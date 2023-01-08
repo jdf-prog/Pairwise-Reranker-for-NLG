@@ -43,6 +43,8 @@ def load_data(data_path, args, max_size=None):
     elif data_path.endswith('.json'):
         with open(data_path, 'r') as fin:
             data = json.load(fin)
+    else:
+        raise ValueError("Unknown data")
     if max_size is not None and max_size > 0:
         data = data[:max_size]
     examples = []

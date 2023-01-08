@@ -72,7 +72,7 @@ parser.add_argument('--load_model_path', type = str, default = None)
 # summary generation
 parser.add_argument('--set', type=str, default = "val",
                     choices = ["train", "first_half_train_shuffled", "second_half_train_shuffled", "val", "test"])
-parser.add_argument('--max_val_size', type = int, default = 100000)
+parser.add_argument('--max_val_size', type = int, default = -1)
 parser.add_argument('--inference_bs', type = int, default = 2)
 parser.add_argument('--save_candidates', type = str2bool, default = True)
 parser.add_argument('--generation_method', type = str, default = "diverse_beam_search",
@@ -85,6 +85,14 @@ parser.add_argument('--top_p', type = float, default = 0.95) # for top-p samplin
 parser.add_argument('--top_k', type = int, default = 50) # for top-k sampling
 parser.add_argument('--stemmer', type = str2bool, default = True)
 
+# generation config
+parser.add_argument('--source_max_length', type = int, default = None)
+parser.add_argument('--candidate_max_length', type = int, default = None)
+parser.add_argument('--length_penalty', type = float, default = None)
+parser.add_argument('--repetition_penalty', type = float, default = None)
+parser.add_argument('--no_repeat_ngram_size', type = int, default = None)
+
+
 parser.add_argument('--start_idx', type = int, default = None)
 parser.add_argument('--end_idx', type = int, default = None)
 parser.add_argument('--partition', type = empty2None, default = None,
@@ -93,8 +101,6 @@ parser.add_argument('--overwrite', type = str2bool, default = True)
 args = parser.parse_args()
 
 dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
-val_data_sizes = [13368, 11332, 4213, 2001, 4018]
-test_data_sizes = [11490, 11334, 4222, 3981, 1497]
 source_max_lengths = [1024, 512, 512, 512, 35]
 candidate_max_lengths = [128, 64, 128, 350, 35]
 clean_ns = [True, False, False, False, False]
@@ -106,18 +112,18 @@ prefix = [None, None, None, "Translate Chinese to English: ", "Generate a senten
 
 idx = dataset_names.index(args.dataset)
 
-args.source_max_length = source_max_lengths[idx]
-args.candidate_max_length = candidate_max_lengths[idx]
+args.source_max_length = source_max_lengths[idx] if args.source_max_length is None else args.source_max_length
+args.candidate_max_length = candidate_max_lengths[idx] if args.candidate_max_length is None else args.candidate_max_length
 args.clean_n = clean_ns[idx]
-if args.model_type == "pegasus":
-    args.length_penalty = length_penalties_pegasus[idx]
-elif args.model_type == "bart":
-    args.length_penalty = length_penalties_bart[idx]
-else:
-    args.length_penalty = 1.0
-
-args.repetition_penalty = repetition_penalties[idx]
-args.no_repeat_ngram_size = no_repeat_ngram_sizes[idx]
+if args.length_penalty is None:
+    if args.model_type == "pegasus":
+        args.length_penalty = length_penalties_pegasus[idx]
+    elif args.model_type == "bart":
+        args.length_penalty = length_penalties_bart[idx]
+    else:
+        args.length_penalty = 1.0
+args.repetition_penalty = repetition_penalties[idx] if args.repetition_penalty is None else args.repetition_penalty
+args.no_repeat_ngram_size = no_repeat_ngram_sizes[idx] if args.no_repeat_ngram_size is None else args.no_repeat_ngram_size
 args.cache_dir = "../../hf_models/" + args.model + "/"
 args.prefix = prefix[idx]
 
@@ -167,10 +173,11 @@ def main(args):
 
     print("Idxs used for saving: {} - {}".format(args.start_idx, args.end_idx))
 
-    print("Cutting data to {} below samples".format(args.max_val_size))
-    sources = sources[:args.max_val_size]
-    targets = targets[:args.max_val_size]
-    print("Current data size: {}".format(len(sources)))
+    if isinstance(args.max_val_size, int) and args.max_val_size > 0:
+        print("Cutting data to {} below samples".format(args.max_val_size))
+        sources = sources[:args.max_val_size]
+        targets = targets[:args.max_val_size]
+        print("Current data size: {}".format(len(sources)))
     if args.debug:
         print(f"Debug mode: cutting data to {args.debug_size} samples")
         sources = sources[:args.debug_size]
@@ -221,25 +228,19 @@ class GenerationDataset(torch.utils.data.Dataset):
         self.tokenizer = tokenizer
         self.sources = sources
         self.targets = targets
-        self.source_max_length = source_max_length
-        self.target_max_length = target_max_length
+        self.source_max_length = min(source_max_length, tokenizer.model_max_length)
+        self.target_max_length = min(target_max_length, tokenizer.model_max_length)
         self.prefix = prefix if prefix is not None else ""
 
     def __len__(self):
         return len(self.sources)
 
-    def __getitem__(self, item):
-        source = self.prefix + self.sources[item]
+    def __getitem__(self, idx):
+        source = self.prefix + self.sources[idx]
         # source = self.sources[item] # debug
-        target = self.targets[item]
-
-        source_inputs = self.tokenizer(source, return_tensors="pt", max_length=self.source_max_length, padding='max_length')
-        source_inputs["input_ids"] = source_inputs["input_ids"][:, :self.source_max_length]
-        source_inputs["attention_mask"] = source_inputs["attention_mask"][:, :self.source_max_length]
-
-        target_inputs = self.tokenizer(target, return_tensors="pt", max_length=self.target_max_length, padding='max_length')
-        target_inputs["input_ids"] = target_inputs["input_ids"][:, :self.target_max_length]
-        target_inputs["attention_mask"] = target_inputs["attention_mask"][:, :self.target_max_length]
+        target = self.targets[idx]
+        source_inputs = self.tokenizer(source, max_length=self.source_max_length, padding='max_length', truncation=True, return_tensors="pt")
+        target_inputs = self.tokenizer(target, max_length=self.target_max_length, padding='max_length', truncation=True, return_tensors="pt")
 
         batch = {
             "source": source,

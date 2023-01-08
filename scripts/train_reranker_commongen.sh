@@ -2,7 +2,8 @@
 #SBATCH --time=6:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:1
+#SBATCH --nodelist=ink-lucy
+#SBATCH --gres=gpu:1080:1
 
 # about 9 hours per training epoch
 # quick for each dev evaluation
@@ -12,6 +13,8 @@ dataset="commongen"
 train_data_path="./data/prepared/${dataset}/train/dataset.jsonl"
 dev_data_path="./data/prepared/${dataset}/val/dataset.jsonl"
 test_data_path="./data/prepared/${dataset}/test/dataset.jsonl"
+
+test_data_path=$dev_data_path # debug
 
 nvidia-smi
 
@@ -28,13 +31,13 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "deberta" \
     --model_name "microsoft/deberta-v3-large" \
-    --run_name "train_commongen_linear" \
+    --run_name "train_commongen_linear_4_method" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
     --n_candidates 60 \
     --candidate_model "t5_common_gen_half+t5_common_gen" \
-    --candidate_generation_method "diverse_beam_search+beam_search" \
+    --candidate_generation_method "diverse_beam_search+beam_search+top_k_sampling+top_p_sampling" \
     --source_maxlength 25 \
     --candidate_maxlength 35 \
     --per_device_train_batch_size 64 \
@@ -52,14 +55,16 @@ train_reranker.py \
     --max_train_data_size -1 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
-    --do_predict False \
     --using_metrics "bleu+cider" \
-    --evaluate_before_training True \
+    # --do_train False \
+    # --do_eval False \
+    # --do_predict True \
+    # --load_checkpoint "./outputs/crosscompare/microsoft/deberta-v3-large/train_commongen_linear/checkpoint-best" \
+    # --evaluate_before_training True \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \
     # --eval_steps 5000 \
     # --save_steps 5000 \
-    # --load_checkpoint "./outputs/crosscompare/roberta-large/train_commongen_error-based/checkpoint-10000" \
     # --curriculum_learning "self-adapted" \
     # --curriculum_size 100000 \
     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/train_commongen_debug_target_only_1/checkpoint-1000" \
@@ -74,8 +79,8 @@ train_reranker.py \
 #     --nproc_per_node 1 \
 # train_reranker.py \
 #     --reranker_type "scr" \
-#     --model_type "roberta" \
-#     --model_name "roberta-large" \
+#     --model_type "deberta" \
+#     --model_name "microsoft/deberta-v3-large" \
 #     --run_name "train_commongen_SummaReranker" \
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
