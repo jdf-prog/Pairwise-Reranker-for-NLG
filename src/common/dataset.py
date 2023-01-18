@@ -6,18 +6,14 @@ import json
 import prettytable as pt
 import logging as log
 import numpy as np
-import uuid
-import multiprocess as mp
-import psutil
 
-from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map
 from typing import Counter, List, Dict, Tuple, Union, Optional, Set
 from collections import Counter
 from common.evaluation import (
     overall_eval,
     SUPPORTED_METRICS,
 )
+from collections import defaultdict
 class CustomDataset:
 
     def __init__(self, items:dict={}, file:str=None):
@@ -33,7 +29,7 @@ class CustomDataset:
         self._set_logger()
         self.self_check()
 
-    def prepare_metrics(self, metrics:List[str]=None, num_workers:int=1):
+    def prepare_metrics(self, metrics:List[str]=None, num_workers:int=1, agg_target=False):
         """
         prepare the dataset for reranking.
         This function computes all the metrics value of each candidate for each source.
@@ -55,8 +51,22 @@ class CustomDataset:
         self.logger.info("Metrics {} already prepared.".format(prepared_metrics))
         self.logger.info("Metrics {} will be prepared.".format(metrics_to_prepare))
         # evaluate and record the metric values
+        if agg_target:
+            gts = defaultdict(list)
+            for item in self.items:
+                key = '#'.join(item['source'].rstrip('\n').split(' '))
+                if isinstance(item['target'], list):
+                    for t in item['target']:
+                        gts[key].append(t.rstrip('\n'))
+                else:
+                    gts[key].append(item['target'].rstrip('\n'))
+                item['key'] = key
+            targets = [gts[item['key']] for item in self.items]
+            for item in self.items:
+                del item['key']
+        else:
+            targets = [item['target'] for item in self.items]
         candidates = [[c['text'] for c in item['candidates']] for item in self.items]
-        targets = [item['target'] for item in self.items]
         scores = overall_eval(candidates, targets, metrics_to_prepare, num_workers)
 
         for i, item in enumerate(self.items):
@@ -147,7 +157,7 @@ class CustomDataset:
         """
         assert len(sources) == len(targets), "Number of original sentences and reference sentences must be equal"
         if ids is None:
-            ids = [str(uuid.uuid4()) for _ in range(len(sources))]
+            ids = [i for i in range(len(sources))]
         else:
             assert len(ids) == len(sources), "Number of Ids must be equal to number of original sentences"
         items = []
@@ -229,6 +239,43 @@ class CustomDataset:
             self.logger.info("No candidates added.")
         self.logger.info("Dataset size: {}".format(len(self.items)))
 
+    def output_for_coco_score(self, output_path, num_candidates=1, methods=None):
+        from pathlib import Path
+        if not isinstance(output_path, Path):
+            output_path = Path(output_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        keys_file = output_path / 'keys.txt'
+        gts_file = output_path / 'gts.txt'
+        res_file = output_path / 'res.txt'
+        sources = []
+        targets = []
+        candidates = []
+        for item in self.items:
+            if methods is not None:
+                candidate_with_methods = [c for c in item['candidates'] if c['generation_method'] in methods]
+            else:
+                candidate_with_methods = item['candidates']
+            candidate_with_methods = candidate_with_methods[:num_candidates]
+            for candidate in candidate_with_methods:
+                if isinstance(item['target'], list):
+                    for target in item['target']:
+                        sources.append(item['source'])
+                        targets.append(target)
+                        candidates.append(candidate['text'])
+                else:
+                    sources.append(item['source'])
+                    targets.append(item['target'])
+                    candidates.append(candidate['text'])
+        with open(keys_file, 'w') as f:
+            for source in sources:
+                f.write(source + '\n')
+        with open(gts_file, 'w') as f:
+            for target in targets:
+                f.write(target + '\n')
+        with open(res_file, 'w') as f:
+            for candidate in candidates:
+                f.write(candidate + '\n')
+
     def __getitem__(self, index):
         """
         get the item at index
@@ -262,7 +309,7 @@ class CustomDataset:
                     computed_metrics = set(cand['scores'].keys())
                 else:
                     computed_metrics = computed_metrics.intersection(set(cand['scores'].keys()))
-        return computed_metrics
+        return computed_metrics or set()
 
     @property
     def candidate_counts(self) -> List[tuple]:

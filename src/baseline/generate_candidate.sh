@@ -88,29 +88,30 @@ nvidia-smi
 # commongen
 ######################################################
 
-# # commongen
-# for set in "val" "test"
-# do
-#     for method in "top_k_sampling"
-#     do
+# commongen
+for set in "val"
+do
+    for method in "diverse_beam_search" "top_p_sampling" "top_k_sampling"
+    do
 
-#         python generate_candidate.py \
-#         --dataset commongen \
-#         --model_type t5 \
-#         --model t5-large \
-#         --model_name t5_common_gen \
-#         --load_model True \
-#         --load_model_path "../../models/t5_common_gen/checkpoint-best" \
-#         --set ${set} \
-#         --inference_bs 10 \
-#         --save_candidates True \
-#         --generation_method ${method} \
-#         --num_return_sequences 15 \
-#         --num_beams 15 \
-#         --num_beam_groups 15
+        python generate_candidate.py \
+        --dataset commongen \
+        --model_type t5 \
+        --model t5-large \
+        --model_name t5_common_gen \
+        --load_model True \
+        --load_model_path "../../models/t5_common_gen/checkpoint-best" \
+        --set ${set} \
+        --inference_bs 10 \
+        --save_candidates True \
+        --generation_method ${method} \
+        # --num_return_sequences 1 \
+        # --num_beams 1 \
+        # --num_beam_groups 1 \
+        # --repetition_penalty 2.5
 
-#     done
-# done
+    done
+done
 
 #######################################################
 # Generate candidates using our half-fine-tuned models
@@ -123,30 +124,30 @@ nvidia-smi
 # For commongen
 ######################################################
 
-for method in "top_k_sampling" "top_p_sampling"
-do
-    python generate_candidate.py \
-    --dataset commongen \
-    --model_type t5 \
-    --model t5-large \
-    --model_name t5_common_gen_half \
-    --load_model True \
-    --load_model_path "../../models/t5_common_gen_1_half/checkpoint-best" \
-    --partition '2_half' \
-    --set 'train' \
-    --inference_bs 10 \
-    --save_candidates True \
-    --generation_method $method \
-    --num_return_sequences 15 \
-    --num_beams 15 \
-    --num_beam_groups 15
-done
+# for method in "top_k_sampling" "top_p_sampling"
+# do
+#     python generate_candidate.py \
+#     --dataset commongen \
+#     --model_type t5 \
+#     --model t5-large \
+#     --model_name t5_common_gen_half \
+#     --load_model True \
+#     --load_model_path "../../models/t5_common_gen_1_half/checkpoint-best" \
+#     --partition '2_half' \
+#     --set 'train' \
+#     --inference_bs 10 \
+#     --save_candidates True \
+#     --generation_method $method \
+#     --num_return_sequences 15 \
+#     --num_beams 15 \
+#     --num_beam_groups 15
+# done
 
 ######################################################
 # For cnndm
 ######################################################
 
-# for method in "beam_search"
+# for method in "top_p_sampling"
 # do
 #     python generate_candidate.py \
 #     --dataset cnndm \
@@ -157,7 +158,7 @@ done
 #     --load_model_path "../../models/pegasus_cnndm_1_half/checkpoint-best" \
 #     --partition '2_half' \
 #     --set train \
-#     --inference_bs 8 \
+#     --inference_bs 2 \
 #     --save_candidates True \
 #     --generation_method $method \
 #     --num_return_sequences 15 \

@@ -22,10 +22,13 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
+        target = self.data[index]["target"]
+        if isinstance(target, list):
+            target = target[0]
         return {
             'index' : index,
             'source' : self.data[index]['source'],
-            'target' : self.data[index]["target"],
+            'target' : target,
             'candidates' : ["{}".format(c['text']) for c in self.data[index]['candidates'][:self.n_candidates]]  if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
             'scores' : [[float(score) for score in c['scores'].values()] for c in self.data[index]['candidates'][:self.n_candidates]] if ('candidates' in self.data[index] and self.n_candidates is not None) else None,
         }
@@ -34,7 +37,7 @@ class Dataset(torch.utils.data.Dataset):
         return self.data[index]
 
 
-def load_data(data_path, args, max_size=None):
+def load_data(data_path, args, max_size=None, reset_scores=False):
     assert data_path, "data_path is not specified"
     print("Loading data from {}".format(data_path))
     if data_path.endswith('.jsonl'):
@@ -61,6 +64,18 @@ def load_data(data_path, args, max_size=None):
             candidate['scores'] = {
                 metric: candidate['scores'][metric] for metric in args.metrics
             }
+
+        if reset_scores:
+            for generation_method in args.candidate_generation_methods:
+                method_candidates = [candidate for candidate in item['candidates'] if candidate['generation_method'] == generation_method]
+                sorted_method_candidates = sorted(method_candidates, key=lambda x: np.mean(list(x['scores'].values())), reverse=True)
+
+                # randomly assign the worst candidate for each generation method a negeative score
+                for metric in sorted_method_candidates[-1]['scores']:
+                    sorted_method_candidates[-1]['scores'][metric] = -random.random()
+            sorted_candidates = sorted(item['candidates'], key=lambda x: np.mean(list(x['scores'].values())), reverse=True)
+            worst_candidate_methods = [candidate['generation_method'] for candidate in sorted_candidates[-len(args.candidate_generation_methods):]]
+            assert set(worst_candidate_methods) == set(args.candidate_generation_methods)
 
     for k, example in enumerate(data):
         if not 'id' in example:

@@ -74,11 +74,15 @@ def main(args):
             train_dataset.index_to_data = indices[random_indices]
             logging.info(f"Using indices from {args.curriculum_indices_path} ({len(random_indices)}/{len(indices)})")
         else:
-            train_examples = load_data(args.train_data_path, args, max_size=args.max_train_data_size)
+            train_examples = load_data(args.train_data_path, args, max_size=args.max_train_data_size, reset_scores=args.reset_scores)
             train_dataset = Dataset(train_examples, args.n_candidates)
     if args.do_eval:
         eval_examples = load_data(args.eval_data_path, args, max_size=args.max_eval_data_size)
         eval_dataset = Dataset(eval_examples, args.n_candidates)
+    else:
+        args.evaluation_strategy = 'no'
+        args.save_strategy = 'no'
+
     if args.do_predict:
         predict_examples = load_data(args.test_data_path, args, max_size=args.max_predict_data_size)
         predict_dataset = Dataset(predict_examples, args.n_candidates)
@@ -99,7 +103,7 @@ def main(args):
         "sub_sampling_mode": args.sub_sampling_mode,
         "loss_type": args.loss_type,
         "new_num_tokens": len(tokenizer),
-        "training_data_size": len(train_dataset) * args.num_train_epochs if train_dataset else 0,
+        "training_data_size": len(train_dataset) * args.num_train_epochs // n_gpu if train_dataset else 0,
         "n_candidates": args.n_candidates,
         "pooling_type": args.pooling_type,
         "reduce_type": args.reduce_type,
@@ -288,7 +292,7 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
         "importance", "random", "poisson_dynamic", "top_bottom_random",
-        "top_uniform", "radius",
+        "top_uniform", "radius", "rank_based", "1_top_bottom"
     ], default="top_bottom")
     parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)
@@ -370,6 +374,10 @@ if __name__ == "__main__":
         help="training data size for each curriculum as a epoch")
     parser.add_argument("--curriculum_indices_path", type=str, default=None,
         help="indices of curriculum data file")
+
+    # reset scores
+    parser.add_argument("--reset_scores", type=str2bool, default=False,
+        help="used to manually reset scores to constrol the pair fed for training")
 
     # init args
     args = parser.parse_args()

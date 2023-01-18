@@ -10,9 +10,7 @@ from tqdm import tqdm
 import torch
 
 def get_candidates(tokenizer, val_loader, model, device, args, **kwargs):
-    val_texts = []
     val_candidates = []
-    val_labels = []
     base_model = model.pretrained_model
 
     for idx, batch in tqdm(enumerate(val_loader), total=len(val_loader)):
@@ -22,7 +20,6 @@ def get_candidates(tokenizer, val_loader, model, device, args, **kwargs):
                 batch["source_inputs"][k] = batch["source_inputs"][k].squeeze(1)
 
         model.zero_grad()
-        val_texts += batch["source"]
 
         raw_candidates = beam_search_step(batch, tokenizer, base_model, device, args, **kwargs)
 
@@ -31,12 +28,9 @@ def get_candidates(tokenizer, val_loader, model, device, args, **kwargs):
             candidates.append(raw_candidates[i*args.num_return_sequences:(i+1)*args.num_return_sequences])
         val_candidates += candidates
 
-        labels = batch["target"]
-        val_labels += labels
+    print(len(val_candidates), len(val_candidates[0]))
 
-    print(len(val_texts), len(val_candidates), len(val_candidates[0]), len(val_labels))
-
-    return val_texts, val_candidates, val_labels
+    return val_candidates
 
 
 def beam_search_step(batch, tokenizer, base_model, device, args, **kwargs):

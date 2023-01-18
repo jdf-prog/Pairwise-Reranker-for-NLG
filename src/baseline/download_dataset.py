@@ -29,7 +29,8 @@ parser.add_argument('--dataset', type=str, default = "cnndm",
                     choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
 
 parser.add_argument('--max_size', type = int, default = 1000000)
-parser.add_argument('--shuffle', action='store_true')
+parser.add_argument('--shuffle_train', action='store_true')
+parser.add_argument('--agg_target', action='store_true')
 
 args = parser.parse_args()
 
@@ -100,7 +101,7 @@ def main(args):
         set_names = ["train", "val", "test"]
         idx = 0
         for set_name in set_names:
-            save_raw_dataset(args.dataset, set_name, set_sources[idx], set_target[idx], args.shuffle)
+            save_raw_dataset(args.dataset, set_name, set_sources[idx], set_target[idx], args.shuffle_train and set_name=="train")
             idx += 1
     else:
         for x in sets:
@@ -110,12 +111,30 @@ def main(args):
                 slang, tlang = args.data_version.split('-')
                 sources = [d[slang] for d in dataset_set['translation']]
                 targets = [d[tlang] for d in dataset_set['translation']]
+            elif 'commongen' in args.dataset:
+                if set_name == 'train' or (not args.agg_target):
+                    sources = [x[args.source_key] for x in dataset_set]
+                    sources = process_sources(sources)
+                    targets = [x[args.target_key] for x in dataset_set]
+                else:
+                    items = {}
+                    for x in dataset_set:
+                        if x['concept_set_idx'] not in items:
+                            items[x['concept_set_idx']] = {}
+                            items[x['concept_set_idx']]['source'] = x[args.source_key]
+                            items[x['concept_set_idx']]['target'] = [x[args.target_key]]
+                        else:
+                            assert x[args.source_key] == items[x['concept_set_idx']]['source'], f"Source mismatch: {x[args.source_key]} vs {items[x['concept_set_idx']]['source']}"
+                            items[x['concept_set_idx']]['target'].append(x[args.target_key])
+                    keys = list(items.keys())
+                    keys = sorted(keys)
+                    sources = [items[key]['source'] for key in keys]
+                    sources = process_sources(sources)
+                    targets = [items[key]['target'] for key in keys]
             else:
                 sources = [x[args.source_key] for x in dataset_set]
                 targets = [x[args.target_key] for x in dataset_set]
-            if 'commongen' in args.dataset:
-                sources = process_sources(sources)
-            save_raw_dataset(args.dataset, set_name, sources, targets, args.shuffle, args.max_size)
+            save_raw_dataset(args.dataset, set_name, sources, targets, args.shuffle_train and set_name=="train", args.max_size)
 
 def process_sources(sources:List[Union[str, List[str]]]):
     """

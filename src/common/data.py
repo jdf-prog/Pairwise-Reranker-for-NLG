@@ -18,11 +18,11 @@ def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=Fals
         dataset_name: the name of the dataset
         set_name: the set to load (train, val, test)
     Returns:
+        ids: the ids of the examples
         sources: the list of sources
         targets: the list of targets
         offsets(Optional): the offsets of the cut points
     """
-    assert set_name in ['train', 'val', 'test']
     assert partition is None or partition in ['1_half', '2_half', 'full']
     print(f"Loading {set_name} set from {dataset_name} dataset...")
     print(f"Using partition {partition}...")
@@ -30,22 +30,25 @@ def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=Fals
     dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
     file_path = dataset_folder / f'{set_name}.jsonl'
     ds = CustomDataset.from_jsonl(file_path)
+    ids = [item['id'] for item in ds]
     sources = [item['source'] for item in ds]
     targets = [item['target'] for item in ds]
     offsets = (0, len(sources))
     if partition in ['1_half', '2_half']:
         if partition == '1_half':
             offsets = (0, len(sources)//2)
+            ids = ids[:len(sources) // 2]
             sources = sources[:len(sources) // 2]
             targets = targets[:len(targets) // 2]
         else:
             offsets = (len(sources)//2, len(sources))
+            ids = ids[len(sources) // 2:]
             sources = sources[len(sources) // 2:]
             targets = targets[len(targets) // 2:]
     if return_offsets:
-        return sources, targets, offsets
+        return ids, sources, targets, offsets
     else:
-        return sources, targets
+        return ids, sources, targets
 
 
 def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, max_size=None):
@@ -61,16 +64,21 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, ma
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
     dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
     file_path = dataset_folder / f'{set_name}.jsonl'
+    ids = [i for i in range(len(sources))]
+    sources = [s.replace("\n", " ").replace("\t", " ").replace("\r", " ") for s in sources]
+    targets = [t.replace("\n", " ").replace("\t", " ").replace("\r", " ") for t in targets]
     if shuffle:
         print("Shuffling the dataset...")
-        indices = np.arange(len(sources))
-        np.random.shuffle(indices)
+        indices = np.random.permutation(len(sources))
+        print(indices[:10])
         sources = [sources[i] for i in indices]
         targets = [targets[i] for i in indices]
+        ids = [ids[i] for i in indices]
     if isinstance(max_size, int) and max_size > 0:
         sources = sources[:max_size]
         targets = targets[:max_size]
-    ds = CustomDataset.from_raw(sources, targets)
+        ids = ids[:max_size]
+    ds = CustomDataset.from_raw(sources, targets, ids=ids)
     ds.to_jsonl(file_path)
     print(f"Saved rawdataset {dataset_name} to {file_path}.")
 
@@ -189,7 +197,7 @@ def load_prepared_dataset(dataset_name, set_name, models:list=None, generation_m
         generation_methods.sort()
     for model, generation_method in itertools.product(models, generation_methods):
         if (model, generation_method) not in cur_types:
-            print(f"Warning: {model} {generation_method} not found in {cur_types}")
+            print(f"Warning: model: {model}, generation method: {generation_method} candidates not found")
             continue
         cur_metrics = get_candidate_metrics(dataset_name, set_name, model, generation_method)
         candidates = load_pkl_candidates(dataset_name, set_name, generation_method, model)

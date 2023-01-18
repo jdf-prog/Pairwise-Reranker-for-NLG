@@ -138,7 +138,7 @@ train_baseline.py \
 #     --fp16 True \
 #     --per_device_train_batch_size 8 \
 #     --per_device_eval_batch_size 64 \
-#     --gradient_accumulation_steps 132 \
+#     --gradient_accumulation_steps 32 \
 #     --learning_rate 5e-5 \
 #     --generation_num_beams 5 \
 #     --num_train_epochs 10 \

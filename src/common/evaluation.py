@@ -3,6 +3,7 @@ import psutil
 import os
 import numpy as np
 import spacy
+from copy import deepcopy
 from evaluate import load
 from sacrebleu import sentence_bleu, corpus_bleu
 from nltk import word_tokenize
@@ -39,8 +40,8 @@ def pre_rouge_processing(summary):
     return summary
 
 def eval_rouge(
-    hypotheses: Union[List[List[str]], List[str]],
-    references: List[str],
+    hypotheses: List[List[str]],
+    references: List[List[str]],
     rouge_types: List[str]=['rouge1', 'rouge2', 'rougeL', 'rougeLsum']
     ) -> Dict[str, float]:
     """
@@ -55,31 +56,22 @@ def eval_rouge(
         A dict of rouge scores.
         key is the rouge type, value is the rouge score, in same shape with hypotheses.
     """
-    do_flatten = False
     assert len(hypotheses) == len(references)
-    for i in range(len(hypotheses)):
-        if isinstance(hypotheses[i], str):
-            do_flatten = True
-            hypotheses[i] = [hypotheses[i]]
     assert set(rouge_types) <= set(['rouge1', 'rouge2', 'rougeL', 'rougeLsum']), "Rouge types should be in ['rouge1', 'rouge2', 'rougeL', 'rougeLsum']"
     scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=True)
     rouge_scores = {rouge_type: [[] for _ in range(len(hypotheses))] for rouge_type in rouge_types}
     with tqdm(total=len(hypotheses), desc="Evaluating rouge") as pbar:
         for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
             for hypo in hypo_group:
-                scores = scorer.score(ref, pre_rouge_processing(hypo))
+                scores = scorer.score_multi(ref, pre_rouge_processing(hypo))
                 for rouge_type in rouge_types:
                     rouge_scores[rouge_type][i].append(scores.get(rouge_type).fmeasure)
             pbar.update(1)
-    # nested remove list with single element
-    if do_flatten:
-        assert all([all([len(score) == 1 for score in scores]) for scores in rouge_scores.values()])
-        rouge_scores = {rouge_type: [score[0] for score in scores] for rouge_type, scores in rouge_scores.items()}
     return rouge_scores
 
 def eval_bleu(
-    hypotheses: Union[List[List[str]], List[str]],
-    references: List[str],
+    hypotheses: List[List[str]],
+    references: List[List[str]],
     ) -> List[float]:
     """
     Evaluate the hypothesis and reference using the metric.
@@ -91,28 +83,42 @@ def eval_bleu(
     Returns:
         A list of bleu scores, in same shape with hypotheses.
     """
-    do_flatten = False
     assert len(hypotheses) == len(references), f"Length of hypotheses {len(hypotheses)} and references {len(references)} should be the same."
-    for i in range(len(hypotheses)):
-        if isinstance(hypotheses[i], str):
-            do_flatten = True
-            hypotheses[i] = [hypotheses[i]]
     bleu_scores = []
     with tqdm(total=len(hypotheses), desc="Evaluating bleu") as pbar:
         for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
             bleu_scores.append([])
             for hypo in hypo_group:
-                bleu_scores[i].append(sentence_bleu(hypo, [ref]).score)
+                bleu_scores[i].append(sentence_bleu(hypo, ref).score)
             pbar.update(1)
-    # nested remove list with single element
-    if do_flatten:
-        assert all([len(score) == 1 for score in bleu_scores])
-        bleu_scores = [score[0] for score in bleu_scores]
     return bleu_scores
 
+def eval_bleurt(
+    hypotheses: List[List[str]],
+    references: List[List[str]]
+    ) -> List[float]:
+    """
+    Evaluate the hypothesis and reference using the metric.
+
+    Args:
+        hypotheses: the hypotheses
+        references: the references
+    """
+    assert len(hypotheses) == len(references)
+    bleurt_scorer = load('bleurt')
+    bleurt_scores = []
+    with tqdm(total=len(hypotheses), desc="Evaluating bleurt") as pbar:
+        for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
+            bleurt_scores.append([])
+            for hypo in hypo_group:
+                result = bleurt_scorer.compute(predictions=[hypo], references=ref)
+                bleurt_scores[i].append(result['scores'][0])
+            pbar.update(1)
+    return bleurt_scores
+
 def eval_bleu4(
-    hypotheses: Union[List[List[str]], List[str]],
-    references: List[str],
+    hypotheses: List[List[str]],
+    references: List[List[str]],
     ) -> List[float]:
     """
     Evaluate the hypothesis and reference using the metric.
@@ -125,13 +131,7 @@ def eval_bleu4(
         A list of bleu scores, in same shape with hypotheses.
     """
     print("Evaluating bleu4")
-    do_flatten = False
     assert len(hypotheses) == len(references)
-    for i in range(len(hypotheses)):
-        if isinstance(hypotheses[i], str):
-            do_flatten = True
-            hypotheses[i] = [hypotheses[i]]
-
     # tokenization
     nlp = spacy.load("en_core_web_sm")
     disable_pipes = list(nlp.pipe_names)
@@ -140,7 +140,8 @@ def eval_bleu4(
     for i in tqdm(range(len(hypotheses)), desc="Tokenizing"):
         for j in range(len(hypotheses[i])):
             hypotheses[i][j] = " ".join([token.text for token in nlp(hypotheses[i][j])])
-        references[i] = " ".join([token.text for token in nlp(references[i])])
+        for j in range(len(references[i])):
+            references[i][j] = " ".join([token.text for token in nlp(references[i][j])])
 
     bleu4_scorer = Bleu(4)
     gts = {}
@@ -151,7 +152,7 @@ def eval_bleu4(
     for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
         hypo_ids_per_ref.append([])
         for hypo in hypo_group:
-            gts[id] = [ref]
+            gts[id] = ref
             res[id] = [hypo]
             hypo_ids_per_ref[i].append(id)
             id += 1
@@ -161,47 +162,12 @@ def eval_bleu4(
         print("%s: %0.3f" % method)
     bleu4_scores = scores[3]
     bleu4_scores = [[bleu4_scores[hypo_id]*100 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
-    # nested remove list with single element
-    if do_flatten:
-        assert all([len(score) == 1 for score in bleu4_scores])
-        bleu4_scores = [score[0] for score in bleu4_scores]
     return bleu4_scores
 
-def eval_bleurt(
-    hypotheses: Union[List[List[str]], List[str]],
-    references: List[str]
-    ) -> List[float]:
-    """
-    Evaluate the hypothesis and reference using the metric.
-
-    Args:
-        hypotheses: the hypotheses
-        references: the references
-    """
-    do_flatten = False
-    assert len(hypotheses) == len(references)
-    bleurt_scorer = load('bleurt')
-    bleurt_scores = []
-    for i in range(len(hypotheses)):
-        if isinstance(hypotheses[i], str):
-            do_flatten = True
-            hypotheses[i] = [hypotheses[i]]
-    with tqdm(total=len(hypotheses), desc="Evaluating bleurt") as pbar:
-        for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
-            bleurt_scores.append([])
-            for hypo in hypo_group:
-                result = bleurt_scorer.compute(predictions=[hypo], references=[ref])
-                bleurt_scores[i].append(result['scores'][0])
-            pbar.update(1)
-    # nested remove list with single element
-    if do_flatten:
-        assert all([len(score) == 1 for score in bleurt_scores])
-        bleurt_scores = [score[0] for score in bleurt_scores]
-    return bleurt_scores
 
 def eval_cider(
-    hypotheses: Union[List[List[str]], List[str]],
-    references: List[str]
+    hypotheses: List[List[str]],
+    references: List[List[str]],
     ) -> List[float]:
     """
     Evaluate the hypothesis and reference using the metric.
@@ -211,12 +177,7 @@ def eval_cider(
         references: the references
     """
     print("Evaluating cider")
-    do_flatten = False
     assert len(hypotheses) == len(references)
-    for i in range(len(hypotheses)):
-        if isinstance(hypotheses[i], str):
-            do_flatten = True
-            hypotheses[i] = [hypotheses[i]]
 
     # tokenization
     nlp = spacy.load("en_core_web_sm")
@@ -226,7 +187,8 @@ def eval_cider(
     for i in tqdm(range(len(hypotheses)), desc="Tokenizing"):
         for j in range(len(hypotheses[i])):
             hypotheses[i][j] = " ".join([token.text for token in nlp(hypotheses[i][j])])
-        references[i] = " ".join([token.text for token in nlp(references[i])])
+        for j in range(len(references[i])):
+            references[i][j] = " ".join([token.text for token in nlp(references[i][j])])
 
     cider_scorer = Cider()
     gts = {}
@@ -237,22 +199,18 @@ def eval_cider(
     for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
         hypo_ids_per_ref.append([])
         for hypo in hypo_group:
-            gts[id] = [ref]
+            gts[id] = ref
             res[id] = [hypo]
             hypo_ids_per_ref[i].append(id)
             id += 1
 
     score, scores = cider_scorer.compute_score(gts, res)
     cider_scores = [[scores[hypo_id]*10 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
-    # nested remove list with single element
-    if do_flatten:
-        assert all([len(score) == 1 for score in cider_scores])
-        cider_scores = [score[0] for score in cider_scores]
     return cider_scores
 
 def eval_spice(
-    hypotheses: Union[List[List[str]], List[str]],
-    references: List[str]
+    hypotheses: List[List[str]],
+    references: List[List[str]]
     ) -> List[float]:
     """
     Evaluate the hypothesis and reference using the metric.
@@ -262,12 +220,7 @@ def eval_spice(
         references: the references
     """
     print("Evaluating spice")
-    do_flatten = False
     assert len(hypotheses) == len(references)
-    for i in range(len(hypotheses)):
-        if isinstance(hypotheses[i], str):
-            do_flatten = True
-            hypotheses[i] = [hypotheses[i]]
     # tokenization
     nlp = spacy.load("en_core_web_sm")
     disable_pipes = list(nlp.pipe_names)
@@ -276,7 +229,8 @@ def eval_spice(
     for i in tqdm(range(len(hypotheses)), desc="Tokenizing"):
         for j in range(len(hypotheses[i])):
             hypotheses[i][j] = " ".join([token.text for token in nlp(hypotheses[i][j])])
-        references[i] = " ".join([token.text for token in nlp(references[i])])
+        for j in range(len(references[i])):
+            references[i][j] = " ".join([token.text for token in nlp(references[i][j])])
 
     spice_scorer = Spice()
     gts = {}
@@ -286,17 +240,13 @@ def eval_spice(
     for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):
         hypo_ids_per_ref.append([])
         for hypo in hypo_group:
-            gts[id] = [ref]
+            gts[id] = ref
             res[id] = [hypo]
             hypo_ids_per_ref[i].append(id)
             id += 1
 
     score, scores = spice_scorer.compute_score(gts, res)
     spice_scores = [[scores[hypo_id]['All']['f']*100.0 for hypo_id in hypo_ids] for hypo_ids in hypo_ids_per_ref]
-    # nested remove list with single element
-    if do_flatten:
-        assertall([len(score) == 1 for score in spice_scores])
-        spice_scores = [score[0] for score in spice_scores]
     return spice_scores
 
 
@@ -451,31 +401,53 @@ def _overall_eval_multi_process(data):
     return overall_eval(candidates, targets, metrics)
 
 def _overall_eval(candidates, targets, metrics:List[str]):
+    do_flatten = False
+    # deepcopy in case it will make change to the passed in candidates and targets
+    candidates = deepcopy(candidates)
+    targets = deepcopy(targets)
+    assert len(candidates) == len(targets)
+    for i in range(len(candidates)):
+        if isinstance(candidates[i], str):
+            do_flatten = True
+            candidates[i] = [candidates[i]]
+        if isinstance(targets[i], str):
+            targets[i] = [targets[i]]
+
     scores = {}
     rouge_tyeps = [metric for metric in metrics if metric.startswith('rouge')]
     if rouge_tyeps:
-        rouge_scores = eval_rouge(candidates, targets, rouge_types=rouge_tyeps)
+        _candidates, _targets = deepcopy(candidates), deepcopy(targets)
+        rouge_scores = eval_rouge(_candidates, _targets, rouge_types=rouge_tyeps)
         scores.update(rouge_scores)
     if 'bleu' in metrics:
-        bleu_scores = eval_bleu(candidates, targets)
+        _candidates, _targets = deepcopy(candidates), deepcopy(targets)
+        bleu_scores = eval_bleu(_candidates, _targets)
         scores.update({'bleu': bleu_scores})
     if 'bleu4' in metrics:
-        bleu4_scores = eval_bleu4(candidates, targets)
+        _candidates, _targets = deepcopy(candidates), deepcopy(targets)
+        bleu4_scores = eval_bleu4(_candidates, _targets)
         scores.update({'bleu4': bleu4_scores})
     if 'bleurt' in metrics:
-        bleurt_scores = eval_bleurt(candidates, targets)
+        _candidates, _targets = deepcopy(candidates), deepcopy(targets)
+        bleurt_scores = eval_bleurt(_candidates, _targets)
         scores.update({'bleurt': bleurt_scores})
     if 'cider' in metrics:
-        cider_scores = eval_cider(candidates, targets)
+        _candidates, _targets = deepcopy(candidates), deepcopy(targets)
+        cider_scores = eval_cider(_candidates, _targets)
         scores.update({'cider': cider_scores})
     if 'spice' in metrics:
-        spice_scores = eval_spice(candidates, targets)
+        _candidates, _targets = deepcopy(candidates), deepcopy(targets)
+        spice_scores = eval_spice(_candidates, _targets)
         scores.update({'spice': spice_scores})
+    if do_flatten:
+        for metric in scores:
+            assert all([len(score) == 1 for score in scores[metric]])
+            scores[metric] = [score[0] for score in scores[metric]]
     return scores
 
 def overall_eval(
     candidates:Union[List[List[str]], List[str]],
-    targets: List[str],
+    targets: Union[List[str], List[List[str]]],
     metrics:List[str],
     num_workers:int=1
     ) -> Dict[str, List[float]]:
@@ -506,3 +478,142 @@ def overall_eval(
     return scores
 
 
+# The following code is another evalution format, for future use
+
+# def eval_bleu4(
+#     hypotheses: List[List[str]],
+#     references: List[List[str]],
+#     ) -> List[float]:
+#     """
+#     Evaluate the hypothesis and reference using the metric.
+
+#     Args:
+#         hypotheses: the hypotheses
+#         references: the references
+
+#     Returns:
+#         A list of bleu scores, in same shape with hypotheses.
+#     """
+#     print("Evaluating bleu4")
+#     assert len(hypotheses) == len(references)
+#     # tokenization
+#     nlp = spacy.load("en_core_web_sm")
+#     disable_pipes = list(nlp.pipe_names)
+#     disable_pipes.remove('tagger')
+#     nlp.disable_pipes(*disable_pipes)
+#     for i in tqdm(range(len(hypotheses)), desc="Tokenizing"):
+#         for j in range(len(hypotheses[i])):
+#             hypotheses[i][j] = " ".join([token.text for token in nlp(hypotheses[i][j])])
+#         for j in range(len(references[i])):
+#             references[i][j] = " ".join([token.text for token in nlp(references[i][j])])
+
+#     bleu4_scorer = Bleu(4)
+#     bleu4_scores = [[] for _ in range(len(hypotheses))]
+#     group_length = len(hypotheses[0])
+#     assert all([len(hypo_group)==group_length for hypo_group in hypotheses])
+#     for i in range(group_length):
+#         print(f"evaluting {i+1}th candidate")
+#         hypos = [hypo_group[i] for hypo_group in hypotheses]
+#         id = 0
+#         gts = {}
+#         res = {}
+#         for hypo, ref in zip(hypos, references):
+#             gts[id] = ref
+#             res[id] = [hypo]
+#             id += 1
+#         score, scores = bleu4_scorer.compute_score(gts, res)
+#         for method, _score in zip(("Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"), score):
+#             print("%s: %0.3f" % (method, _score), end='\t')
+#         scores = scores[3] # select bleu4 score
+#         for i in range(len(scores)):
+#             bleu4_scores[i].append(scores[i]*100)
+#     return bleu4_scores
+
+# def eval_cider(
+#     hypotheses: List[List[str]],
+#     references: List[List[str]],
+#     ) -> List[float]:
+#     """
+#     Evaluate the hypothesis and reference using the metric.
+
+#     Args:
+#         hypotheses: the hypotheses
+#         references: the references
+#     """
+#     print("Evaluating cider")
+#     assert len(hypotheses) == len(references)
+
+#     # tokenization
+#     nlp = spacy.load("en_core_web_sm")
+#     disable_pipes = list(nlp.pipe_names)
+#     disable_pipes.remove('tagger')
+#     nlp.disable_pipes(*disable_pipes)
+#     for i in tqdm(range(len(hypotheses)), desc="Tokenizing"):
+#         for j in range(len(hypotheses[i])):
+#             hypotheses[i][j] = " ".join([token.text for token in nlp(hypotheses[i][j])])
+#         for j in range(len(references[i])):
+#             references[i][j] = " ".join([token.text for token in nlp(references[i][j])])
+
+#     cider_scorer = Cider()
+#     cider_scores = [[] for _ in range(len(hypotheses))]
+#     group_length = len(hypotheses[0])
+#     assert all([len(hypo_group)==group_length for hypo_group in hypotheses])
+#     for i in range(group_length):
+#         print(f"evaluting {i+1}th candidate")
+#         hypos = [hypo_group[i] for hypo_group in hypotheses]
+#         id = 0
+#         gts = {}
+#         res = {}
+#         for hypo, ref in zip(hypos, references):
+#             gts[id] = ref
+#             res[id] = [hypo]
+#             id += 1
+#         score, scores = cider_scorer.compute_score(gts, res)
+#         print(f"CIDEr Score: {score*10}")
+#         for i in range(len(scores)):
+#             cider_scores[i].append(scores[i]*10)
+#     return cider_scores
+
+# def eval_spice(
+#     hypotheses: List[List[str]],
+#     references: List[List[str]]
+#     ) -> List[float]:
+#     """
+#     Evaluate the hypothesis and reference using the metric.
+
+#     Args:
+#         hypotheses: the hypotheses
+#         references: the references
+#     """
+#     print("Evaluating spice")
+#     assert len(hypotheses) == len(references)
+#     # tokenization
+#     nlp = spacy.load("en_core_web_sm")
+#     disable_pipes = list(nlp.pipe_names)
+#     disable_pipes.remove('tagger')
+#     nlp.disable_pipes(*disable_pipes)
+#     for i in tqdm(range(len(hypotheses)), desc="Tokenizing"):
+#         for j in range(len(hypotheses[i])):
+#             hypotheses[i][j] = " ".join([token.text for token in nlp(hypotheses[i][j])])
+#         for j in range(len(references[i])):
+#             references[i][j] = " ".join([token.text for token in nlp(references[i][j])])
+
+#     spice_scorer = Spice()
+#     spice_scores = [[] for _ in range(len(hypotheses))]
+#     group_length = len(hypotheses[0])
+#     assert all([len(hypo_group)==group_length for hypo_group in hypotheses])
+#     for i in range(group_length):
+#         print(f"evaluting {i+1}th candidate")
+#         hypos = [hypo_group[i] for hypo_group in hypotheses]
+#         id = 0
+#         gts = {}
+#         res = {}
+#         for hypo, ref in zip(hypos, references):
+#             gts[id] = ref
+#             res[id] = [hypo]
+#             id += 1
+#         score, scores = spice_scorer.compute_score(gts, res)
+#         print(f"SPICE Score: {score*100}")
+#         for i in range(len(scores)):
+#             spice_scores[i].append(scores[i]['All']['f']*100)
+#     return spice_scores

@@ -12,19 +12,19 @@
 # num_shards=1
 # shard_size=50
 
-dataset=cnndm
-model_type=pegasus
-model=google/pegasus-large
-model_name="pegasus_cnndm_half"
-load_model=True
-load_model_path="../../models/pegasus_cnndm_1_half/checkpoint-best"
+dataset=wmt18
+model_type="opus-mt"
+model="Helsinki-NLP/opus-mt-zh-en"
+model_name="opus_mt"
+load_model=False
+load_model_path=""
 set='train'
-partition='2_half'
-inference_bs=2
+partition='full'
+inference_bs=10
 generation_method="top_p_sampling"
 
-num_shards=15
-shard_size=10000
+num_shards=5
+shard_size=100000
 
 for shard_id in $(seq 0 $((num_shards - 1)))
 do

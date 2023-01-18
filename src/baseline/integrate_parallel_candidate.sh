@@ -1,2 +1,2 @@
 python integrate_parallel_candidate.py \
-    --dataset cnndm --set train
+    --dataset wmt18 --set train

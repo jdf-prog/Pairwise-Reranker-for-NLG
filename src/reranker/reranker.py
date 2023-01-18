@@ -408,6 +408,7 @@ class CrossCompareReranker(nn.Module):
         self.hidden_size = pretrained_model.config.hidden_size
         self.sep_token_id = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
         self.tokenizer = tokenizer
+        self.model_max_length = pretrained_model.config.max_position_embeddings
 
         self.head_layer = nn.Sequential(
             nn.Dropout(self.drop_out),
@@ -698,11 +699,13 @@ class CrossCompareReranker(nn.Module):
     def sampling(self, scores):
         """
         Args:
-            scores: [batch_size, n_candidates]
+            scores: [batch_size, n_candidates, n_tasks]
             n_pair: int
             device: torch.device
         """
-        batch_size, n_candidates = scores.shape
+        batch_size, n_candidates, n_tasks = scores.shape
+        scores_per_tasks = scores
+        scores = scores.mean(dim=-1)
         n_pair = min(self.num_pos, self.num_neg)
         device = scores.device
 
@@ -740,6 +743,9 @@ class CrossCompareReranker(nn.Module):
             neg_idx = sorted_idx[:, -n_pair:]
             random_idx = torch.stack([torch.randperm(pos_idx.shape[1]) for _ in range(batch_size)], dim=0).to(device)
             pos_idx = pos_idx[torch.arange(batch_size).view(-1, 1), random_idx]
+        elif self.sub_sampling_mode == "1_top_bottom":
+            pos_idx = sorted_idx[:, :1].expand(-1, n_pair)
+            neg_idx = sorted_idx[:, -n_pair:]
         elif self.sub_sampling_mode == "random":
             # 2. random sampling
             n_pair = int(n_candidates * self.sub_sampling_ratio)
@@ -751,6 +757,15 @@ class CrossCompareReranker(nn.Module):
             pos_idx = sorted_idx[:, 0:-step:step]
             neg_idx = sorted_idx[:, step::step]
             n_pair = pos_idx.shape[1]
+        elif self.sub_sampling_mode == "rank_based":
+            rank_scope = int(n_candidates * (self.args['training_steps'] / self.args['training_data_size'])) + 1
+            rank_scope = min(rank_scope, n_candidates)
+            pos_idx = torch.stack([torch.randperm(rank_scope)[:n_pair] for _ in range(batch_size)], dim=0).to(device)
+            neg_idx = torch.stack([torch.randperm(rank_scope)[:n_pair] for _ in range(batch_size)], dim=0).to(device)
+            neg_idx = n_candidates - neg_idx - 1
+            pos_idx = torch.gather(sorted_idx, 1, pos_idx)
+            neg_idx = torch.gather(sorted_idx, 1, neg_idx)
+            self.args['training_steps'] += batch_size
         elif self.sub_sampling_mode == "poisson_dynamic":
             # 2. using rank dif as difficulty measure function
             self.args['training_steps'] += batch_size
@@ -809,6 +824,10 @@ class CrossCompareReranker(nn.Module):
     def cat_ids(self, ids1, masks1, ids2, masks2, ids3=None, masks3=None):
         """
         Concatenate ids and masks, move padding to the end
+        Args:
+            ids1, masks1: source ids and masks
+            ids2, masks2: candidate ids and masks or the concatentated ids and masks
+            ids3, masks3 (optional): candidate ids and masks
         """
         assert ids1.shape[:-1] == ids2.shape[:-1]
         assert ids1.shape[:-1] == ids3.shape[:-1] if ids3 is not None else True
@@ -851,13 +870,33 @@ class CrossCompareReranker(nn.Module):
                     masks2[i, sep_token_idx2[i] + 1:],
                     masks3[i, sep_token_idx3[i] + 1:],
                 ], dim=0))
-                assert masks1[i, :sep_token_idx1[i] + 1].eq(1).all(), masks1[i, :sep_token_idx1[i] + 1]
-                assert masks2[i, :sep_token_idx2[i] + 1].eq(1).all(), masks2[i, :sep_token_idx2[i] + 1]
-                assert masks3[i, :sep_token_idx3[i] + 1].eq(1).all(), masks3[i, :sep_token_idx3[i] + 1]
-                assert masks1[i, sep_token_idx1[i] + 1:].eq(0).all(), masks1[i, sep_token_idx1[i] + 1:]
-                assert masks2[i, sep_token_idx2[i] + 1:].eq(0).all(), masks2[i, sep_token_idx2[i] + 1:]
-                assert masks3[i, sep_token_idx3[i] + 1:].eq(0).all(), masks3[i, sep_token_idx3[i] + 1:]
+            #     ids1_content_idx = sep_token_idx1[i]
+            #     ids2_content_idx = sep_token_idx2[i]
+            #     ids3_content_idx = sep_token_idx3[i]
+            #     ids1_content_idx = min(
+            #         ids1_content_idx,
+            #         self.model_max_length - ids2_content_idx - ids3_content_idx - 3)
 
+            #     cat_ids.append(torch.cat([
+            #         ids1[i, :ids1_content_idx],
+            #         ids1[i, sep_token_idx1[i]:sep_token_idx1[i] + 1], # sep token
+            #         ids2[i, :sep_token_idx2[i] + 1],
+            #         ids3[i, :sep_token_idx3[i] + 1],
+            #     ], dim=0))
+            #     cat_masks.append(torch.cat([
+            #         masks1[i, :ids1_content_idx],
+            #         masks1[i, sep_token_idx1[i]:sep_token_idx1[i] + 1],
+            #         masks2[i, :sep_token_idx2[i] + 1],
+            #         masks3[i, :sep_token_idx3[i] + 1],
+            #     ], dim=0))
+            #     assert cat_masks[i] == torch.ones_like(cat_masks[i])
+            # max_len = max([len(x) for x in cat_ids])
+            # assert all([len(x) == max_len for x in cat_ids])
+            # for i in range(bz):
+            #     # add padding to the end
+            #     cat_ids[i] = torch.cat([cat_ids[i], torch.ones(max_len - len(cat_ids[i]), dtype=torch.long, device=cat_ids[i].device)], dim=0)
+            #     # add mask to the end
+            #     cat_masks[i] = torch.cat([cat_masks[i], torch.zeros(max_len - len(cat_masks[i]), dtype=torch.long, device=cat_masks[i].device)], dim=0)
         else:
             for i in range(bz):
                 cat_ids.append(torch.cat([
@@ -1156,14 +1195,6 @@ class CrossCompareReranker(nn.Module):
                 candidate_attention_mask: [batch_size, 2*cand_len]
                 scores: [batch_size, n_tasks, 2] (left, right)
         """
-        # print("source")
-        # print(self.tokenizer.decode(source_ids[0]))
-        # print("target")
-        # print(self.tokenizer.decode(target_ids[0]))
-        # print("candidate")
-        # print(self.tokenizer.batch_decode(candidate_ids[0]))
-        # print("scores")
-        # print(scores[0])
         device = source_ids.device
         outputs = {}
         if candidate_ids.dim() == 2:
@@ -1196,13 +1227,8 @@ class CrossCompareReranker(nn.Module):
                 if self.args['n_candidates'] == -1:
                     self.args['n_candidates'] = n_candidates
 
-                left_idx, right_idx = self.sampling(scores.mean(-1))
+                left_idx, right_idx = self.sampling(scores)
                 batch_idx = torch.arange(batch_size).unsqueeze(1)
-                sorted_idx = torch.argsort(scores, dim=1)
-                # ranks = torch.arange(n_candidates).view(1, -1, 1).expand_as(scores).to(device)
-                # ranks = ranks.scatter(1, sorted_idx, ranks)
-                # ranks = ranks.type(torch.float32) / n_candidates
-                # scores = ranks
                 left_cand_ids = candidate_ids[batch_idx, left_idx]
                 right_cand_ids = candidate_ids[batch_idx, right_idx]
                 left_cand_attention_mask = candidate_attention_mask[batch_idx, left_idx]
@@ -1214,24 +1240,17 @@ class CrossCompareReranker(nn.Module):
                 cand1_prefix_ids = cand1_prefix_ids.expand(batch_size, n_pair, 1)
                 cand2_prefix_ids = torch.tensor(self.tokenizer.cand2_prefix_id).to(device)
                 cand2_prefix_ids = cand2_prefix_ids.expand(batch_size, n_pair, 1)
-                left_cand_ids[:,:,0] = cand1_prefix_ids[:,:,0]
-                right_cand_ids[:,:,0] = cand2_prefix_ids[:,:,0]
+                left_cand_ids[:,:,0] = cand1_prefix_ids[:,:,0] # replace cls with cand1 prefix
+                right_cand_ids[:,:,0] = cand2_prefix_ids[:,:,0] # replace cls with cand2 prefix
                 candidate_pair_ids, candidate_pair_attention_mask = self.cat_ids(
                     expanded_source_ids,
                     expanded_source_attention_mask,
                     left_cand_ids,
                     left_cand_attention_mask,
                     right_cand_ids,
-                    right_cand_attention_mask)
+                    right_cand_attention_mask) # concat source and 2 candidates
                 left_scores = scores[batch_idx, left_idx]
                 right_scores = scores[batch_idx, right_idx]
-
-                # print("candidate pair")
-                # print(self.tokenizer.batch_decode(candidate_pair_ids[0]))
-                # print("left scores")
-                # print(left_scores[0])
-                # print("right scores")
-                # print(right_scores[0])
 
                 outputs = self._forward(
                     candidate_pair_ids,

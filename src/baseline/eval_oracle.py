@@ -9,7 +9,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.data import (
     load_pkl_candidates,
+    load_raw_dataset,
     save_pkl_cand_scores,
+    save_pkl_sources_and_targets,
     get_candidate_types,
     get_candidate_metrics,
     load_pkl_sources_and_targets,
@@ -45,7 +47,14 @@ def main(args):
 
     # model and generation_method of current computed candidates
     types = get_candidate_types(args.dataset, args.set)
-    sources, targets = load_pkl_sources_and_targets(args.dataset, args.set)
+    try:
+        print("load pkl sources and targets")
+        sources, targets = load_pkl_sources_and_targets(args.dataset, args.set)
+    except:
+        print("pkl sources and targets not found, load from raw dataset")
+        ids, sources, targets = load_raw_dataset(args.dataset, args.set)
+        save_pkl_sources_and_targets(args.dataset, args.set, sources, targets)
+
     # add candidates if the curent model and generation_method are not in the dataset
     for model_name, generation_method in types:
         print("Checking candidates scores from -- model:{} \t generation method:{}".format(model_name, generation_method))

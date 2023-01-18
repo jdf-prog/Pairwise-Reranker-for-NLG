@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
-#SBATCH --job-name=train_reranker
+#SBATCH --time=5:00:00
+#SBATCH --job-name=train_reranker_cnndm
 #SBATCH --output ../jobs/%j.out
 #SBATCH --gres=gpu:6000:2
+#SBATCH --qos=general
 #SBATCH -n 1
 
 
@@ -27,7 +28,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "deberta" \
     --model_name "microsoft/deberta-v3-large" \
-    --run_name "train_cnndm_full_comparison" \
+    --run_name "train_cnndm_384_source_length" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -37,8 +38,8 @@ train_reranker.py \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 64 \
-    --gradient_accumulation_steps 4 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 2 \
     --num_train_epochs 5 \
     --overwrite_output_dir True \
     --num_pos 1 \
@@ -56,7 +57,8 @@ train_reranker.py \
     --do_eval False \
     --do_predict True \
     --load_checkpoint "./outputs/crosscompare/microsoft/deberta-v3-large/trian_cnndm_BCE_single_linear/checkpoint-best" \
-    --inference_mode "full" \
+    # --reset_scores True \
+    # --inference_mode "full" \
     # --evaluate_before_training True \
     # --evaluation_strategy "steps" \
     # --save_strategy "steps" \

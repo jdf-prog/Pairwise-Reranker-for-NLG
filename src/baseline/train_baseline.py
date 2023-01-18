@@ -35,11 +35,11 @@ def main(args):
 
     if args.do_train:
         if '1_half' in args.model_name:
-            sources, targets = load_raw_dataset(args.dataset, 'train', '1_half')
+            ids, sources, targets = load_raw_dataset(args.dataset, 'train', '1_half')
         elif '2_half' in args.model_name:
-            sources, targets = load_raw_dataset(args.dataset, 'train', '2_half')
+            ids, sources, targets = load_raw_dataset(args.dataset, 'train', '2_half')
         else:
-            sources, targets = load_raw_dataset(args.dataset, 'train', 'full')
+            ids, sources, targets = load_raw_dataset(args.dataset, 'train', 'full')
         train_dataset = Dataset(sources, targets, max_size=args.max_train_data_size)
     else:
         train_dataset = None
@@ -51,14 +51,14 @@ def main(args):
         else:
             args.evaluation_strategy = 'epoch'
             args.save_strategy = 'epoch'
-        sources, targets = load_raw_dataset(args.dataset, 'val', 'full')
+        ids, sources, targets = load_raw_dataset(args.dataset, 'val', 'full')
         eval_dataset = Dataset(sources, targets, max_size=args.max_eval_data_size)
     else:
         eval_dataset = None
         args.evaluation_strategy = 'no'
         args.save_strategy = 'no'
     if args.do_predict:
-        sources, targets = load_raw_dataset(args.dataset, 'test', 'full')
+        ids, sources, targets = load_raw_dataset(args.dataset, 'test', 'full')
         predict_dataset = Dataset(sources, targets, max_size=args.max_predict_data_size)
     else:
         predict_dataset = None
@@ -347,7 +347,6 @@ if __name__ == '__main__':
     metrics = ["rouge1+rouge2+rougeLsum", "rouge1+rouge2+rougeLsum", "rouge1+rouge2+rougeLsum", "bleu", "cider+bleu"]
     # setting default values
     idx = dataset_names.index(args.dataset)
-    args.learning_rate = lr[idx] if args.learning_rate is None else args.learning_rate
     args.prefix = prefix[idx] if args.prefix is None and 't5' in args.model_type else args.prefix
     args.generation_max_length = args.target_max_length if args.generation_max_length is None else args.generation_max_length
     args.metrics = metrics[idx] if args.metrics is None else args.metrics

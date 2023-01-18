@@ -196,10 +196,6 @@ class CrossCompareCollator(object):
         batch_candidates = [b['candidates'] for b in batch]
         batch_scores = [b['scores'] for b in batch]
 
-        batch_source = get_truncated_text(batch_source, self.tokenizer, self.source_maxlength)
-        batch_candidates = [get_truncated_text(c, self.tokenizer, self.candidate_maxlength) for c in batch_candidates]
-        batch_target = get_truncated_text(batch_target, self.tokenizer, self.target_maxlength)
-
         source_ids, source_masks = encode_texts(batch_source, self.tokenizer, self.source_maxlength)
         target_ids, target_masks = encode_texts(batch_target, self.tokenizer, self.candidate_maxlength)
         candidate_ids, candidate_masks = encode_batch_text(batch_candidates, self.tokenizer, self.candidate_maxlength)

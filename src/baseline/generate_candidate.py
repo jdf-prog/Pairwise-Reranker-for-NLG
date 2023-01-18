@@ -65,7 +65,8 @@ parser.add_argument('--model_name', type=str, default = "pegasus_reddit_train_1"
                         "t5_wmt18_1_half", "t5_wmt18_2_half", "t5_wmt18_half",
                         "t5_common_gen_1_half", "t5_common_gen_2_half", "t5_common_gen_half",
                         "opus_mt", "nllb-3.3B", "nllb-1.3B", "nllb-600M", "m2m100",
-                        'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen'])
+                        'flan-t5-large', 'flan-t5-base', 't5_common_gen', 'bart_common_gen',
+                        't5_common_gen_1_beam'])
 parser.add_argument('--load_model', type = str2bool, default = False)
 parser.add_argument('--load_model_path', type = str, default = None)
 
@@ -153,10 +154,11 @@ def main(args):
         forced_bos_token_id = None
 
     # data
-    sources, targets, offsets = load_raw_dataset(args.dataset, args.set, partition=args.partition, return_offsets=True)
+    ids, sources, targets, offsets = load_raw_dataset(args.dataset, args.set, partition=args.partition, return_offsets=True)
 
     if args.start_idx is not None and args.end_idx is not None:
         print("Using start_idx: {}, end_idx: {}".format(args.start_idx, args.end_idx))
+        ids = ids[args.start_idx:args.end_idx]
         sources = sources[args.start_idx:args.end_idx]
         targets = targets[args.start_idx:args.end_idx]
         if len(sources) < args.end_idx - args.start_idx:
@@ -175,11 +177,13 @@ def main(args):
 
     if isinstance(args.max_val_size, int) and args.max_val_size > 0:
         print("Cutting data to {} below samples".format(args.max_val_size))
+        ids = ids[:args.max_val_size]
         sources = sources[:args.max_val_size]
         targets = targets[:args.max_val_size]
         print("Current data size: {}".format(len(sources)))
     if args.debug:
         print(f"Debug mode: cutting data to {args.debug_size} samples")
+        ids = ids[:args.debug_size]
         sources = sources[:args.debug_size]
         targets = targets[:args.debug_size]
         print("Current data size: {}".format(len(sources)))
@@ -212,7 +216,7 @@ def main(args):
     print("\nThe model has {} trainable parameters".format(n_params))
     model = model.to(device)
     # summary generation
-    _, candidates, _ = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
+    candidates = get_candidates(tokenizer, dataloader, model, device, args, forced_bos_token_id=forced_bos_token_id)
 
     # export
     if args.save_candidates:
@@ -237,16 +241,10 @@ class GenerationDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         source = self.prefix + self.sources[idx]
-        # source = self.sources[item] # debug
-        target = self.targets[idx]
         source_inputs = self.tokenizer(source, max_length=self.source_max_length, padding='max_length', truncation=True, return_tensors="pt")
-        target_inputs = self.tokenizer(target, max_length=self.target_max_length, padding='max_length', truncation=True, return_tensors="pt")
-
         batch = {
             "source": source,
             "source_inputs": source_inputs,
-            "target": target,
-            "target_inputs": target_inputs,
         }
 
         return batch

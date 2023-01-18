@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --time=12:00:00
-#SBATCH --job-name=train_reranker
+#SBATCH --time=2:00:00
+#SBATCH --job-name=train_reranker_wmt18
 #SBATCH --output ../jobs/%j.out
-#SBATCH --nodelist=ink-lucy
-#SBATCH --gres=gpu:1080:1
+#SBATCH --gres=gpu:6000:1
+#SBATCH --qos=general
 #SBATCH -n 1
 
 
@@ -19,65 +19,16 @@ localhost=$RANDOM
 
 cd ../
 
-torchrun \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint="localhost:${localhost}" \
-    --nnodes 1 \
-    --nproc_per_node 1 \
-train_reranker.py \
-    --reranker_type "crosscompare" \
-    --model_type "deberta" \
-    --model_name "microsoft/deberta-v3-large" \
-    --run_name "train_wmt18_linear_4_method" \
-    --train_data_path ${train_data_path} \
-    --eval_data_path ${dev_data_path} \
-    --test_data_path ${test_data_path} \
-    --n_candidates 60 \
-    --candidate_model "opus_mt" \
-    --candidate_generation_method "diverse_beam_search+beam_search+top_k_sampling+top_p_sampling" \
-    --source_maxlength 112 \
-    --candidate_maxlength 200 \
-    --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 2 \
-    --num_train_epochs 5 \
-    --overwrite_output_dir True \
-    --num_pos 1 \
-    --num_neg 1 \
-    --loss_type "BCE" \
-    --sub_sampling_mode "top_bottom" \
-    --reduce_type  "linear" \
-    --pooling_type "special" \
-    --max_train_data_size -1 \
-    --max_eval_data_size -1 \
-    --max_predict_data_size -1 \
-    --using_metrics "bleu" \
-    --do_train False \
-    --do_eval False \
-    --do_predict True \
-    --load_checkpoint "outputs/crosscompare/microsoft/deberta-v3-large/train_wmt18_linear/checkpoint-best" \
-    # --evaluate_before_training True \
-    # --do_predict False \
-    # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
-    # --evaluation_strategy "steps" \
-    # --save_strategy "steps" \
-    # --eval_steps 100 \
-    # --save_steps 100 \
-    # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
-    # --do_train False \
-    # --do_eval False \
-
-
 # torchrun \
 #     --rdzv_backend=c10d \
 #     --rdzv_endpoint="localhost:${localhost}" \
 #     --nnodes 1 \
 #     --nproc_per_node 1 \
 # train_reranker.py \
-#     --reranker_type "scr" \
+#     --reranker_type "crosscompare" \
 #     --model_type "deberta" \
 #     --model_name "microsoft/deberta-v3-large" \
-#     --run_name "train_wmt18_SummaReranker" \
+#     --run_name "train_wmt18_rank_based_full_comparison" \
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \
@@ -86,19 +37,73 @@ train_reranker.py \
 #     --candidate_generation_method "diverse_beam_search+beam_search" \
 #     --source_maxlength 112 \
 #     --candidate_maxlength 200 \
-#     --per_device_train_batch_size 8 \
-#     --per_device_eval_batch_size 4 \
-#     --gradient_accumulation_steps 8 \
+#     --per_device_train_batch_size 4 \
+#     --per_device_eval_batch_size 256 \
+#     --gradient_accumulation_steps 16 \
 #     --num_train_epochs 5 \
 #     --overwrite_output_dir True \
-#     --loss_type "MoE_BCE" \
-#     --sub_sampling_mode "top_bottom" \
 #     --num_pos 1 \
 #     --num_neg 1 \
-#     --learning_rate 1e-5 \
+#     --loss_type "BCE" \
+#     --sub_sampling_mode "top_bottom" \
+#     --reduce_type  "linear" \
+#     --pooling_type "special" \
+#     --max_train_data_size -1 \
+#     --max_eval_data_size -1 \
+#     --max_predict_data_size -1 \
 #     --using_metrics "bleu" \
+#     --do_train False \
+#     --do_eval False \
+#     --do_predict True \
+#     --load_checkpoint "outputs/crosscompare/microsoft/deberta-v3-large/train_wmt18_rank_based/checkpoint-best" \
+#     --inference_mode 'full' \
+#     # --reset_scores False \
 #     # --evaluate_before_training True \
-#     # --load_checkpoint "./outputs/scr/roberta-large/basic_beam_30/checkpoint-1930" \
+#     # --do_predict False \
+#     # --load_checkpoint "./outputs/crosscompare/roberta-large/debug_2_pos_2_neg_basic/checkpoint-best" \
+#     # --evaluation_strategy "steps" \
+#     # --save_strategy "steps" \
+#     # --eval_steps 100 \
+#     # --save_steps 100 \
+#     # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
+#     # --do_train False \
+#     # --do_eval False \
+
+
+torchrun \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint="localhost:${localhost}" \
+    --nnodes 1 \
+    --nproc_per_node 1 \
+train_reranker.py \
+    --reranker_type "scr" \
+    --model_type "deberta" \
+    --model_name "microsoft/deberta-v3-large" \
+    --run_name "train_wmt18_SummaReranker" \
+    --train_data_path ${train_data_path} \
+    --eval_data_path ${dev_data_path} \
+    --test_data_path ${test_data_path} \
+    --n_candidates 30 \
+    --candidate_model "opus_mt" \
+    --candidate_generation_method "diverse_beam_search+beam_search" \
+    --source_maxlength 112 \
+    --candidate_maxlength 200 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 4 \
+    --gradient_accumulation_steps 8 \
+    --num_train_epochs 5 \
+    --overwrite_output_dir True \
+    --loss_type "MoE_BCE" \
+    --sub_sampling_mode "top_bottom" \
+    --num_pos 1 \
+    --num_neg 1 \
+    --learning_rate 1e-5 \
+    --using_metrics "bleu" \
+    # --do_train False \
+    # --do_eval False \
+    # --do_predict True \
+    # --load_checkpoint "outputs/scr/microsoft/deberta-v3-large/train_wmt18_SummaReranker/checkpoint-best" \
+    # --evaluate_before_training True \
 
 # torchrun \
 #     --rdzv_backend=c10d \

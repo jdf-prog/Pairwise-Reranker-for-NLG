@@ -18,12 +18,13 @@ from common.utils import (
 )
 
 def main(args):
-    sources, targets = load_raw_dataset(args.dataset, args.set)
+    ids, sources, targets = load_raw_dataset(args.dataset, args.set)
     idxs = np.arange(len(sources))
     np.random.shuffle(idxs)
     tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
     print("selecting sampling with length lower than {} tokens".format(args.max_src_tokens))
     idxs = [idx for idx in idxs if len(tokenizer.tokenize(sources[idx])) < args.max_src_tokens]
+    ids = [ids[idx] for idx in idxs][:args.max_size]
     sources = [sources[idx] for idx in idxs][:args.max_size]
     targets = [targets[idx] for idx in idxs][:args.max_size]
     print("Number of samples: {}".format(len(sources)))
