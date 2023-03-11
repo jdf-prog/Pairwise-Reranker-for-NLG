@@ -119,7 +119,7 @@ class CustomDataset:
                 })
             else:
                 # if the candidates are a list of candidates
-                for j, cand in enumerate(cands):
+                for j, cand in enumerate(cands[:10]):
                     cand_scores = {k: v[i][j] for k, v in scores.items()} if scores is not None else {}
                     item['candidates'].append({
                         "model": model,
