@@ -11,7 +11,7 @@ from common.dataset import CustomDataset
 
 
 
-def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=False):
+def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=False, load_shuffle=True):
     """
         Load from the specified dataset. Note that the data path is hard-coded here!
     Args:
@@ -27,7 +27,10 @@ def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=Fals
     print(f"Loading {set_name} set from {dataset_name} dataset...")
     print(f"Using partition {partition}...")
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
-    dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
+    if load_shuffle:
+        dataset_folder = cur_folder.parent.parent / 'data' / 'raw_shuffled' / dataset_name
+    else:
+        dataset_folder = cur_folder.parent.parent / 'data' / 'raw_not_shuffled' / dataset_name
     file_path = dataset_folder / f'{set_name}.jsonl'
     ds = CustomDataset.from_jsonl(file_path)
     ids = [item['id'] for item in ds]
@@ -62,12 +65,11 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, ma
         targets: the list of targets
     """
     cur_folder = Path(os.path.realpath(os.path.dirname(__file__)))
-    dataset_folder = cur_folder.parent.parent / 'data' / 'raw' / dataset_name
-    file_path = dataset_folder / f'{set_name}.jsonl'
     ids = [i for i in range(len(sources))]
     sources = [s.replace("\n", " ").replace("\t", " ").replace("\r", " ") for s in sources]
     targets = [t.replace("\n", " ").replace("\t", " ").replace("\r", " ") for t in targets]
     if shuffle:
+        dataset_folder = cur_folder.parent.parent / 'data' / 'raw_shuffled' / dataset_name
         print("Shuffling the dataset...")
         indices = np.random.permutation(len(sources))
         print(indices[:10])
@@ -75,9 +77,11 @@ def save_raw_dataset(dataset_name, set_name, sources, targets, shuffle=False, ma
         targets = [targets[i] for i in indices]
         ids = [ids[i] for i in indices]
     if isinstance(max_size, int) and max_size > 0:
+        dataset_folder = cur_folder.parent.parent / 'data' / 'raw_not_shuffled' / dataset_name
         sources = sources[:max_size]
         targets = targets[:max_size]
         ids = ids[:max_size]
+    file_path = dataset_folder / f'{set_name}.jsonl'
     ds = CustomDataset.from_raw(sources, targets, ids=ids)
     ds.to_jsonl(file_path)
     print(f"Saved rawdataset {dataset_name} to {file_path}.")

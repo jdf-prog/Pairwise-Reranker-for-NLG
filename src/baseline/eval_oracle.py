@@ -75,7 +75,7 @@ def main(args):
             for k, v in scores.items():
                 save_pkl_cand_scores(args.dataset, args.set, generation_method, model_name, k, v)
 
-    ds = load_prepared_dataset(args.dataset, args.set, metrics=metrics)
+    ds = load_prepared_dataset(args.dataset, args.set, metrics=metrics, generation_methods=["top_p_sampling"])
     ds.analyze_oracle()
     if args.save_prepared:
         save_prepared_dataset(args.dataset, args.set, ds)

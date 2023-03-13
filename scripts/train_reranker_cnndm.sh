@@ -28,7 +28,7 @@ train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "deberta" \
     --model_name "microsoft/deberta-v3-large" \
-    --run_name "train_cnndm_384_source_length" \
+    --run_name "train_${dataset}_PairReranker" \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
@@ -83,7 +83,7 @@ train_reranker.py \
 #     --reranker_type "scr" \
 #     --model_type "deberta" \
 #     --model_name "microsoft/deberta-v3-large" \
-#     --run_name "train_cnndm_SummaReranker" \
+#     --run_name "train_${dataset}_SummaReranker" \
 #     --train_data_path ${train_data_path} \
 #     --eval_data_path ${dev_data_path} \
 #     --test_data_path ${test_data_path} \

@@ -405,13 +405,23 @@ def _overall_eval(candidates, targets, metrics:List[str]):
     # deepcopy in case it will make change to the passed in candidates and targets
     candidates = deepcopy(candidates)
     targets = deepcopy(targets)
-    assert len(candidates) == len(targets)
+    assert len(candidates) == len(targets), f"candidates and targets should have the same length, but got {len(candidates)} and {len(targets)}"
+    # if there are no available targets, return None
+    if all([target == '' for target in targets]) or \
+        all([target == [] for target in targets]):
+        return {
+            metric: [
+                [0 for _ in range(len(candidates[i]))]
+                for i in range(len(candidates))]
+            for metric in metrics
+        }
     for i in range(len(candidates)):
         if isinstance(candidates[i], str):
             do_flatten = True
             candidates[i] = [candidates[i]]
         if isinstance(targets[i], str):
             targets[i] = [targets[i]]
+
 
     scores = {}
     rouge_tyeps = [metric for metric in metrics if metric.startswith('rouge')]
