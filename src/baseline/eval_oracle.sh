@@ -56,7 +56,7 @@ for set in train val test; do
         --set $set \
         --metrics "rouge" \
         --num_workers 1 \
-        --save_prepared True \
+        # --save_prepared True \
 
 done
 
@@ -66,7 +66,7 @@ for set in train val test; do
         --set $set \
         --metrics "bleu,cider" \
         --num_workers 1 \
-        --save_prepared True \
+        # --save_prepared True \
 
 done
 
@@ -76,6 +76,6 @@ for set in train val test; do
         --set $set \
         --metrics "bleu" \
         --num_workers 1 \
-        --save_prepared True \
+        # --save_prepared True \
 
 done

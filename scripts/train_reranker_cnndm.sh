@@ -1,17 +1,27 @@
 #!/bin/bash
-#SBATCH --time=5:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=train_reranker_cnndm
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:6000:2
-#SBATCH --qos=general
+#SBATCH --gres=gpu:8000:1
 #SBATCH -n 1
 
 
-dataset="cnndm"
+dataset="cnndm_chatgpt"
 
 train_data_path="./data/prepared/${dataset}/train/dataset.jsonl"
 dev_data_path="./data/prepared/${dataset}/val/dataset.jsonl"
 test_data_path="./data/prepared/${dataset}/test/dataset.jsonl"
+candidate_model="gpt-3.5-turbo" # or "pegasus_cnndm+pegasus_cnndm_half"
+candidate_generation_method="top_p_sampling"
+n_candidates=10
+learning_rate=1e-5
+source_maxlength=256
+candidate_maxlength=128
+per_device_train_batch_size=16
+per_device_eval_batch_size=32
+gradient_accumulation_steps=4
+num_train_epochs=5
+
 
 nvidia-smi
 
@@ -19,11 +29,12 @@ localhost=$RANDOM
 
 cd ../
 
+
 torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint="localhost:${localhost}" \
     --nnodes 1 \
-    --nproc_per_node 2 \
+    --nproc_per_node 1 \
 train_reranker.py \
     --reranker_type "crosscompare" \
     --model_type "deberta" \
@@ -32,85 +43,70 @@ train_reranker.py \
     --train_data_path ${train_data_path} \
     --eval_data_path ${dev_data_path} \
     --test_data_path ${test_data_path} \
-    --n_candidates 30 \
-    --candidate_model "pegasus_cnndm+pegasus_cnndm_half" \
-    --candidate_generation_method "diverse_beam_search+beam_search" \
-    --source_maxlength 256 \
-    --candidate_maxlength 128 \
-    --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 2 \
-    --num_train_epochs 5 \
-    --overwrite_output_dir True \
+    --n_candidates ${n_candidates} \
+    --candidate_model ${candidate_model} \
+    --candidate_generation_method ${candidate_generation_method} \
+    --learning_rate ${learning_rate} \
+    --source_maxlength ${source_maxlength} \
+    --candidate_maxlength ${candidate_maxlength} \
+    --per_device_train_batch_size ${per_device_train_batch_size} \
+    --per_device_eval_batch_size ${per_device_eval_batch_size} \
+    --gradient_accumulation_steps ${gradient_accumulation_steps} \
+    --num_train_epochs ${num_train_epochs} \
     --num_pos 1 \
     --num_neg 1 \
     --loss_type "BCE" \
     --sub_sampling_mode "top_bottom" \
-    --reduce_type  "single_linear" \
+    --reduce_type  "linear" \
     --pooling_type "special" \
-    --sub_sampling_ratio 0.1 \
     --max_train_data_size -1 \
     --max_eval_data_size -1 \
     --max_predict_data_size -1 \
     --using_metrics "rouge1+rouge2+rougeLsum" \
-    --do_train False \
-    --do_eval False \
-    --do_predict True \
-    --load_checkpoint "./outputs/crosscompare/microsoft/deberta-v3-large/trian_cnndm_BCE_single_linear/checkpoint-best" \
-    # --reset_scores True \
-    # --inference_mode "full" \
-    # --evaluate_before_training True \
-    # --evaluation_strategy "steps" \
-    # --save_strategy "steps" \
-    # --eval_steps 1000 \
-    # --save_steps 1000 \
-    # --evaluate_before_training True \
-    # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/trian_cnndm_BCE_full/checkpoint-2000"
-    # --max_grad_norm 100 \
-    # --max_grad_norm 100.0 \
+    --overwrite_output_dir True \
     # --do_train False \
+    # --do_eval False \
     # --do_predict True \
-    # --resume_from_checkpoint "./outputs/crosscompare/roberta-large/debug_poisson_dynamic/checkpoint-2000" \
+    # --load_checkpoint "./outputs/crosscompare/microsoft/deberta-v3-large/trian_cnndm_BCE_single_linear/checkpoint-best" \
+    # --inference_mode "full" \
 
-
-
-# torchrun \
-#     --rdzv_backend=c10d \
-#     --rdzv_endpoint="localhost:${localhost}" \
-#     --nnodes 1 \
-#     --nproc_per_node 4 \
-# train_reranker.py \
-#     --reranker_type "scr" \
-#     --model_type "deberta" \
-#     --model_name "microsoft/deberta-v3-large" \
-#     --run_name "train_${dataset}_SummaReranker" \
-#     --train_data_path ${train_data_path} \
-#     --eval_data_path ${dev_data_path} \
-#     --test_data_path ${test_data_path} \
-#     --n_candidates 30 \
-#     --candidate_model "pegasus_cnndm+pegasus_cnndm_half" \
-#     --candidate_generation_method "diverse_beam_search+beam_search" \
-#     --source_maxlength 384 \
-#     --candidate_maxlength 128 \
-#     --per_device_train_batch_size 8 \
-#     --per_device_eval_batch_size 4 \
-#     --gradient_accumulation_steps 2 \
-#     --num_train_epochs 5 \
-#     --overwrite_output_dir True \
-#     --loss_type "MoE_BCE" \
-#     --sub_sampling_mode "top_bottom" \
-#     --num_pos 1 \
-#     --num_neg 1 \
-#     --learning_rate 1e-5 \
-#     --max_train_data_size -1 \
-#     --max_eval_data_size -1 \
-#     --max_predict_data_size -1 \
-#     --using_metrics "rouge1+rouge2+rougeLsum" \
-#     # --do_train False \
-#     # --do_eval False \
-#     # --do_predict True \
-#     # --load_checkpoint "./outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-best" \
-#     # --evaluate_before_training True \
+torchrun \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint="localhost:${localhost}" \
+    --nnodes 1 \
+    --nproc_per_node 4 \
+train_reranker.py \
+    --reranker_type "scr" \
+    --model_type "deberta" \
+    --model_name "microsoft/deberta-v3-large" \
+    --run_name "train_${dataset}_SummaReranker" \
+    --train_data_path ${train_data_path} \
+    --eval_data_path ${dev_data_path} \
+    --test_data_path ${test_data_path} \
+    --n_candidates ${n_candidates} \
+    --candidate_model ${candidate_model} \
+    --candidate_generation_method ${candidate_generation_method} \
+    --learning_rate ${learning_rate} \
+    --source_maxlength ${source_maxlength} \
+    --candidate_maxlength ${candidate_maxlength} \
+    --per_device_train_batch_size ${per_device_train_batch_size} \
+    --per_device_eval_batch_size ${per_device_eval_batch_size} \
+    --gradient_accumulation_steps ${gradient_accumulation_steps} \
+    --num_train_epochs ${num_train_epochs} \
+    --num_pos 1 \
+    --num_neg 1 \
+    --loss_type "MoE_BCE" \
+    --sub_sampling_mode "top_bottom" \
+    --max_train_data_size -1 \
+    --max_eval_data_size -1 \
+    --max_predict_data_size -1 \
+    --using_metrics "rouge1+rouge2+rougeLsum" \
+    --overwrite_output_dir True \
+    # --do_train False \
+    # --do_eval False \
+    # --do_predict True \
+    # --load_checkpoint "./outputs/scr/roberta-large/train_cnndm_MoE_BCE/checkpoint-best" \
+    # --evaluate_before_training True \
 
 
 # torchrun \
