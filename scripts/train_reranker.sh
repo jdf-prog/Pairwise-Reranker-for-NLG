@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --time=5:00:00
+#SBATCH --time=24:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:2080:1
+#SBATCH --gres=gpu:2
 nvidia-smi
 cd ../
 
 localhost=$RANDOM
-dataset="commongen_chatgpt"
+dataset="cnndm_chatgpt"
 backbone_type="deberta" # "deberta" or "roberta"
 backbone_name="microsoft/deberta-v3-large" # "microsoft/deberta-v3-large" or "roberta-large"
-n_gpu=1
+n_gpu=2
 reranker="PairReranker" # "PairReranker" or "SummaReranker"
 candidate_model="gpt-3.5-turbo"
 candidate_generation_method="top_p_sampling"
