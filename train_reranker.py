@@ -19,6 +19,7 @@ from transformers.trainer_utils import PredictionOutput
 warnings.filterwarnings("ignore")
 from src.common.utils import (
     str2bool,
+    empty2None,
     seed_everything
 )
 from src.reranker.trainer import (
@@ -265,7 +266,7 @@ if __name__ == "__main__":
         "roberta", "bert", "t5", 'deberta', 'xlm-roberta'
     ], default="roberta")
     parser.add_argument("--model_name", type=str, default="roberta-base")
-    parser.add_argument("--load_checkpoint", type=str, default=None)
+    parser.add_argument("--load_checkpoint", type=empty2None, default=None)
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",

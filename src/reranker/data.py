@@ -54,12 +54,14 @@ def load_data(data_path, args, max_size=None, reset_scores=False):
 
     for item in data:
         if args.candidate_models is not None:
-            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['model'] in args.candidate_models]
+            candidates = [candidate for candidate in item['candidates'] if candidate['model'] in args.candidate_models]
         if args.candidate_generation_methods is not None:
-            item['candidates'] = [candidate for candidate in item['candidates'] if candidate['generation_method'] in args.candidate_generation_methods]
-        if len(item['candidates']) == 0:
-            raise ValueError("No candidates left after filtering")
-
+            candidates = [candidate for candidate in item['candidates'] if candidate['generation_method'] in args.candidate_generation_methods]
+        if len(candidates) == 0:
+            available_model_methods = set([(candidate['model'], candidate['generation_method']) for candidate in item["candidates"]])
+            raise ValueError("No candidates left after filtering, available models and methods are: \n{}".format(
+                "\n".join([str(x) for x in available_model_methods])))
+        item['candidates'] = candidates
         for candidate in item['candidates']:
             candidate['scores'] = {
                 metric: candidate['scores'][metric] for metric in args.metrics
