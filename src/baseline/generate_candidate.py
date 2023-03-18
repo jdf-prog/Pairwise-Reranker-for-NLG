@@ -45,6 +45,7 @@ parser.add_argument('--debug_size', type = int, default = 10)
 # data
 parser.add_argument('--dataset', type=str, default = "cnndm",
                     choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
+parser.add_argument('--load_shuffle', type = str2bool, default = False)
 
 # model
 parser.add_argument('--model_type', type = str, default = "pegasus",
@@ -73,7 +74,7 @@ parser.add_argument('--load_model_path', type = str, default = None)
 # summary generation
 parser.add_argument('--set', type=str, default = "val",
                     choices = ["train", "first_half_train_shuffled", "second_half_train_shuffled", "val", "test"])
-parser.add_argument('--max_val_size', type = int, default = -1)
+parser.add_argument('--max_size', type = int, default = -1)
 parser.add_argument('--inference_bs', type = int, default = 2)
 parser.add_argument('--save_candidates', type = str2bool, default = True)
 parser.add_argument('--generation_method', type = str, default = "diverse_beam_search",
@@ -111,7 +112,11 @@ repetition_penalties = [1.0, 1.0, 1.0, 1.0, 1.0]
 no_repeat_ngram_sizes = [0, 3, 3, 0, 0]
 prefix = [None, None, None, "Translate Chinese to English: ", "Generate a sentence with the following words: "]
 
-idx = dataset_names.index(args.dataset)
+idx = 0
+for i in range(len(dataset_names)):
+    if dataset_names[i] in args.model_name:
+        idx = i
+        break
 
 args.source_max_length = source_max_lengths[idx] if args.source_max_length is None else args.source_max_length
 args.candidate_max_length = candidate_max_lengths[idx] if args.candidate_max_length is None else args.candidate_max_length
@@ -154,7 +159,13 @@ def main(args):
         forced_bos_token_id = None
 
     # data
-    ids, sources, targets, offsets = load_raw_dataset(args.dataset, args.set, partition=args.partition, return_offsets=True)
+    ids, sources, targets, offsets = load_raw_dataset(
+        args.dataset,
+        args.set,
+        partition=args.partition,
+        return_offsets=True,
+        load_shuffle=args.load_shuffle
+    )
 
     if args.start_idx is not None and args.end_idx is not None:
         print("Using start_idx: {}, end_idx: {}".format(args.start_idx, args.end_idx))
@@ -175,11 +186,11 @@ def main(args):
 
     print("Idxs used for saving: {} - {}".format(args.start_idx, args.end_idx))
 
-    if isinstance(args.max_val_size, int) and args.max_val_size > 0:
-        print("Cutting data to {} below samples".format(args.max_val_size))
-        ids = ids[:args.max_val_size]
-        sources = sources[:args.max_val_size]
-        targets = targets[:args.max_val_size]
+    if isinstance(args.max_size, int) and args.max_size > 0:
+        print("Cutting data to {} below samples".format(args.max_size))
+        ids = ids[:args.max_size]
+        sources = sources[:args.max_size]
+        targets = targets[:args.max_size]
         print("Current data size: {}".format(len(sources)))
     if args.debug:
         print(f"Debug mode: cutting data to {args.debug_size} samples")

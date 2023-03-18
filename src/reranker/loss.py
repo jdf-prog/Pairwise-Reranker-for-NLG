@@ -133,51 +133,7 @@ def infoNCE_loss(sim_mat, labels, temperature=0.07):
     loss = -torch.log(pos_sim / (pos_sim + neg_sim)).mean()
     return loss
 
-def triplet_loss(sim_mat, target_sim, sum_scores):
-    """
-    Args:
-        sim_mat: [batch_size, n_candidates]
-        target_sim: [batch_size]
-        sum_scores: [batch_size, n_candidates]
-    Return:
-        loss: [1]
-    """
-    batch_size, n_candidates = sim_mat.shape
-    sum_scores = sum_scores
-    loss = torch.tensor(0.0).to(sim_mat.device)
-    sorted_idx = torch.argsort(sum_scores, dim=1, descending=True) # [batch_size, n_candidates]
-    for i in range(batch_size):
-
-        sim_mat_i = sim_mat[tor]
-
-
-def triplet_loss_v2(pred_scores, scores, temperature=1.0):
-    """
-    Args:
-        Note here greater is better
-        pred_scores: [batch_size, n_candidates]
-        scores: [batch_size, n_candidates]
-    Return:
-        loss: [1]
-    """
-    scores = F.softmax(scores/temperature, dim=1)
-    batch_size, n_candidates = pred_scores.shape
-    # compute loss
-    sorted_indices = torch.argsort(scores, dim=1, descending=True) # [batch_size, n_candidates]
-    top_idx = sorted_indices[:, 0] # [batch_size]
-    top_scores = scores[torch.arange(batch_size), top_idx] # [batch_size]
-    top_pred_scores = pred_scores[torch.arange(batch_size), top_idx] # [batch_size]
-    loss = torch.tensor(0.0).to(pred_scores.device)
-    for i in range(1, n_candidates):
-        margin = top_scores - scores[torch.arange(batch_size), sorted_indices[:, i]]
-        loss += torch.mean(
-            torch.max(
-                torch.tensor(0.0).to(pred_scores.device),
-                pred_scores[torch.arange(batch_size), sorted_indices[:, i]] - top_pred_scores + margin
-            ))
-    return loss
-
-def triplet_simcls_loss(sim_mat, target_sim, scores):
+def simcls_loss(sim_mat, target_sim, scores):
     """
     Args:
         sim_mat: [batch_size, n_candidates]

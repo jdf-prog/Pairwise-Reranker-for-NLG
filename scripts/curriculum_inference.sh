@@ -28,9 +28,9 @@ curriculum_inference.py \
     --model_name "roberta-large" \
     --data_path ${data_path} \
     --n_candidates 30 \
-    --candidate_model "pegasus_cnndm+pegasus_cnndm_half" \
+    --candidate_model "pegasus_cnndm,pegasus_cnndm_half" \
     --candidate_generation_method "diverse_beam_search+beam_search" \
-    --using_metrics "rouge1+rouge2+rougeLsum" \
+    --using_metrics "rouge1,rouge2,rougeLsum" \
     --source_maxlength 256 \
     --candidate_maxlength 128 \
     --per_device_eval_batch_size 32 \

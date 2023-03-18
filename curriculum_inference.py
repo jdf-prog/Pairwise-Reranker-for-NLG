@@ -170,7 +170,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
-      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
+      "triplet", "triplet_v2", "simcls", "MoE_BCE", "MSE", "ApproxNDCG",
       "ranknet", "MoE_ranknet", "lambdarank"
     ], default="BCE")
 
@@ -188,7 +188,7 @@ if __name__ == "__main__":
         "importance", "random", "poisson_dynamic"
     ], default="top_bottom")
     parser.add_argument("--max_data_size", type=int, default=-1)
-    parser.add_argument("--using_metrics", type=str, default="rouge1+rouge2+rougeLsum")
+    parser.add_argument("--using_metrics", type=str, default="rouge1,rouge2,rougeLsum")
 
     # running config
     parser.add_argument("--seed", type=int, default=42)
@@ -211,9 +211,9 @@ if __name__ == "__main__":
     # set up default output dir
     args.output_dir = Path(args.data_path).parent if args.output_dir is None else Path(args.output_dir)
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
-    args.candidate_generation_methods = args.candidate_generation_method.split('+')
-    args.candidate_models = args.candidate_model.split('+')
-    args.metrics = args.using_metrics.split('+')
+    args.candidate_generation_methods = args.candidate_generation_method.split(',')
+    args.candidate_models = args.candidate_model.split(',')
+    args.metrics = args.using_metrics.split(',')
     # set up logging
     if args.log_level == "passive":
         args.log_level = "info"

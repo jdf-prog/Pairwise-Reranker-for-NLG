@@ -18,9 +18,7 @@ from reranker.loss import (
     ListNet_loss,
     ListMLE_loss,
     p_ListMLE_loss,
-    triplet_loss,
-    triplet_loss_v2,
-    triplet_simcls_loss,
+    simcls_loss,
     ApproxNDCG_loss,
     ranknet_loss,
     lambdarank_loss
@@ -159,13 +157,9 @@ class SCR(nn.Module):
             loss = ListNet_loss(pred_scores, scores)
         elif self.loss_type == "p_ListMLE":
             loss = p_ListMLE_loss(pred_scores, scores)
-        elif self.loss_type == "triplet":
-            loss = triplet_loss(pred_scores, scores)
-        elif self.loss_type == "triplet_v2":
-            loss = triplet_loss_v2(pred_scores, scores)
-        elif self.loss_type == "triplet_simcls":
+        elif self.loss_type == "simcls":
             target_pred_scores = self._forawrd(target_ids, target_attention_mask)[0] # [batch_size, n_tasks]
-            loss = triplet_simcls_loss(pred_scores, target_pred_scores, scores)
+            loss = simcls_loss(pred_scores, target_pred_scores, scores)
         elif self.loss_type == "ApproxNDCG":
             loss = ApproxNDCG_loss(pred_scores, scores)
         elif "ranknet" in self.loss_type.lower():
@@ -224,8 +218,8 @@ class DualReranker(nn.Module):
 
         # LM
         self.source_encoder = pretrained_model
-        self.candidate_encoder = deepcopy(pretrained_model)
-        # self.candidate_encoder = pretrained_model
+        # self.candidate_encoder = deepcopy(pretrained_model)
+        self.candidate_encoder = pretrained_model
         self.hidden_size = self.source_encoder.config.hidden_size
         self.step = 0
         self.tokenizer = tokenizer
@@ -325,14 +319,6 @@ class DualReranker(nn.Module):
             candidate_attention_mask = candidate_attention_mask[torch.arange(batch_size).unsqueeze(-1), selected_idx]
             scores = scores[torch.arange(batch_size).unsqueeze(-1), selected_idx]
             labels = labels[torch.arange(batch_size).unsqueeze(-1), selected_idx]
-            if self.loss_type == "joint":
-                # if self.step // (200*8) % 2 == 0: # debug
-                if self.step < (200*8) and False:
-                    type = "source_target"
-                else:
-                    type = "candidates"
-            elif self.loss_type == "source_target":
-                type = "source_target"
         sim_mat, target_sim_mat = self._forward(
             source_ids, source_attention_mask,
             target_ids, target_attention_mask,
@@ -350,21 +336,8 @@ class DualReranker(nn.Module):
             loss = ListNet_loss(sim_mat, sum_scores)
         elif self.loss_type == "p_ListMLE":
             loss = p_ListMLE_loss(sim_mat, sum_scores)
-        elif self.loss_type == "triplet":
-            loss = triplet_loss(sim_mat, sum_scores)
-        elif self.loss_type == "triplet_v2":
-            loss = triplet_loss_v2(sim_mat, sum_scores)
-        elif self.loss_type == "triplet_simcls":
-            loss = triplet_simcls_loss(sim_mat, target_sim_mat, sum_scores)
-        elif self.loss_type == "source_target":
-            pos_neg_mask = torch.where(torch.eye(target_sim_mat.shape[0]).bool(), torch.tensor(1), torch.tensor(-1)).to(target_sim_mat.device)
-            loss = -torch.mean(torch.sum(target_sim_mat * pos_neg_mask, dim=1))
-        elif self.loss_type == "joint":
-            if type == "source_target":
-                pos_neg_mask = torch.where(torch.eye(target_sim_mat.shape[0]).bool(), torch.tensor(1), torch.tensor(-1)).to(target_sim_mat.device)
-                loss = -torch.mean(torch.sum(target_sim_mat * pos_neg_mask, dim=1))
-            elif type == "candidates":
-                loss = triplet_simcls_loss(sim_mat, target_sim_mat, sum_scores)
+        elif self.loss_type == "simcls":
+            loss = simcls_loss(sim_mat, target_sim_mat, sum_scores)
         else:
             raise ValueError("Loss type not supported")
 
@@ -800,11 +773,6 @@ class CrossCompareReranker(nn.Module):
                 sorted_idx[:, -1],
                 sorted_idx[:, n_candidates // 2],
             ], dim = -1)
-        elif self.sub_sampling_mode == "radius":
-            step = n_candidates // (n_pair * 2)
-            filted_sorted_ids = sorted_idx[:, 0::step]
-            pos_idx = filted_sorted_ids[:, :n_pair]
-            neg_idx = filted_sorted_ids[:, -n_pair:]
         else:
             raise ValueError(f"Unknown sampling mode: {self.sub_sampling_mode}")
 
@@ -1566,6 +1534,9 @@ def sub_sampling(mode, num_pos, num_neg, ratio, scores):
             idx = unique_idx[idx]
             selected_idx.append(idx)
         selected_idx = torch.tensor(selected_idx)
+    elif mode == "none":
+        selected_idx = torch.arange(n_candidates)
+        selected_idx = selected_idx.unsqueeze(0).repeat(batch_size, 1)
     else:
         raise NotImplementedError
 

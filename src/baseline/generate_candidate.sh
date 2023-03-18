@@ -16,14 +16,14 @@ nvidia-smi
 
 # for set in "test"
 # do
-#     for method in "beam_search"
+#     for method in "beam_search" "diverse_beam_search"
 #     do
 #         python generate_candidate.py \
 #         --dataset cnndm \
-#         --model_type pegasus \
-#         --model google/pegasus-large \
-#         --model_name pegasus_cnndm_2_half \
-#         --load_model True \
+#         --model_type bart \
+#         --model facebook/bart-large-cnn \
+#         --model_name bart_cnndm \
+#         --load_model False \
 #         --set ${set} \
 #         --inference_bs 2 \
 #         --save_candidates True \
@@ -31,7 +31,6 @@ nvidia-smi
 #         --num_return_sequences 15 \
 #         --num_beams 15 \
 #         --num_beam_groups 15 \
-#         --load_model_path "../../models/pegasus_cnndm_2_half/checkpoint-best" \
 
 #     done
 # done
@@ -91,24 +90,22 @@ nvidia-smi
 # commongen
 for set in "val"
 do
-    for method in "diverse_beam_search" "top_p_sampling" "top_k_sampling"
+    for method in "diverse_beam_search" "beam_search"
     do
-
         python generate_candidate.py \
-        --dataset commongen \
-        --model_type t5 \
-        --model t5-large \
-        --model_name t5_common_gen \
-        --load_model True \
-        --load_model_path "../../models/t5_common_gen/checkpoint-best" \
+        --dataset commongen_flan \
+        --model_type flan-t5 \
+        --model google/flan-t5-large \
+        --model_name flan_t5 \
+        --load_model False \
         --set ${set} \
         --inference_bs 10 \
         --save_candidates True \
         --generation_method ${method} \
-        # --num_return_sequences 1 \
-        # --num_beams 1 \
-        # --num_beam_groups 1 \
-        # --repetition_penalty 2.5
+        --num_return_sequences 15 \
+        --num_beams 15 \
+        --num_beam_groups 15 \
+        # --load_model_path "../../models/t5_common_gen/checkpoint-best" \
 
     done
 done

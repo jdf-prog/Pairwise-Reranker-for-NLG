@@ -324,8 +324,8 @@ if __name__ == "__main__":
 
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
 
-    args.candidate_generation_methods = args.candidate_generation_method.split('+')
-    args.candidate_models = args.candidate_model.split('+')
+    args.candidate_generation_methods = args.candidate_generation_method.split(',')
+    args.candidate_models = args.candidate_model.split(',')
 
     # set up logging
     if args.log_level == "passive":

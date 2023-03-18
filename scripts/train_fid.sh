@@ -30,7 +30,7 @@ train_fid.py \
     --test_data_path ${test_data_path} \
     --n_candidates 1 \
     --candidate_model "pegasus_cnndm" \
-    --candidate_generation_method "diverse_beam_search+beam_search" \
+    --candidate_generation_method "diverse_beam_search,beam_search" \
     --source_maxlength 384 \
     --candidate_maxlength 128 \
     --per_device_train_batch_size 1 \
