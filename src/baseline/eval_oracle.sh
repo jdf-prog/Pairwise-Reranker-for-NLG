@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --time=10:00:00
+#SBATCH --time=24:00:00
 #SBATCH --job-name=eval_oracle
 #SBATCH --output ../../jobs/%j.out
-#SBATCH --cpus-per-task=8
+#SBATCH --nodelist=ink-ellie
 
-# python eval_oracle.py \
-#     --dataset cnndm \
-#     --set train \
-#     --metrics "rouge" \
-#     --num_workers 1 \
-#     --save_prepared True \
+python eval_oracle.py \
+    --dataset cnndm_bart \
+    --set val \
+    --metrics "rouge" \
+    --num_workers 1 \
+    --save_prepared True \
 
 # python eval_oracle.py \
 #     --dataset wmt18 \
@@ -48,34 +48,34 @@
 #     --num_workers 1 \
 
 
-# FOR: chatgpt
+# # FOR: chatgpt
 
-for set in train val test; do
-    python eval_oracle.py \
-        --dataset cnndm_chatgpt \
-        --set $set \
-        --metrics "rouge" \
-        --num_workers 1 \
-        # --save_prepared True \
+# for set in train val test; do
+#     python eval_oracle.py \
+#         --dataset cnndm_chatgpt \
+#         --set $set \
+#         --metrics "rouge" \
+#         --num_workers 1 \
+#         --save_prepared True \
 
-done
+# done
 
-for set in train val test; do
-    python eval_oracle.py \
-        --dataset commongen_chatgpt \
-        --set $set \
-        --metrics "bleu,cider" \
-        --num_workers 1 \
-        # --save_prepared True \
+# for set in train val test; do
+#     python eval_oracle.py \
+#         --dataset commongen_chatgpt \
+#         --set $set \
+#         --metrics "bleu,cider" \
+#         --num_workers 1 \
+#         --save_prepared True \
 
-done
+# done
 
-for set in train val test; do
-    python eval_oracle.py \
-        --dataset wmt18_chatgpt \
-        --set $set \
-        --metrics "bleu" \
-        --num_workers 1 \
-        # --save_prepared True \
+# for set in train val test; do
+#     python eval_oracle.py \
+#         --dataset wmt18_chatgpt \
+#         --set $set \
+#         --metrics "bleu" \
+#         --num_workers 1 \
+#         --save_prepared True \
 
-done
+# done

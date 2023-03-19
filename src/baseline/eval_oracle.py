@@ -52,7 +52,7 @@ def main(args):
         sources, targets = load_pkl_sources_and_targets(args.dataset, args.set)
     except:
         print("pkl sources and targets not found, load from raw dataset")
-        ids, sources, targets = load_raw_dataset(args.dataset, args.set)
+        ids, sources, targets = load_raw_dataset(args.dataset, args.set, load_shuffle=args.load_shuffle)
         save_pkl_sources_and_targets(args.dataset, args.set, sources, targets)
 
     # add candidates if the curent model and generation_method are not in the dataset
@@ -75,7 +75,7 @@ def main(args):
             for k, v in scores.items():
                 save_pkl_cand_scores(args.dataset, args.set, generation_method, model_name, k, v)
 
-    ds = load_prepared_dataset(args.dataset, args.set, metrics=metrics, generation_methods=["top_p_sampling"])
+    ds = load_prepared_dataset(args.dataset, args.set, metrics=metrics)
     ds.analyze_oracle()
     if args.save_prepared:
         save_prepared_dataset(args.dataset, args.set, ds)
@@ -90,6 +90,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--overwrite", type=str2bool, default=False)
+    parser.add_argument("--load_shuffle", type=str2bool, default=False)
     # metrics
     parser.add_argument("--metrics", type=str, default="rouge,bleu",
         help="metrics to compute, support rouge, bleu, bleurt, cider, spice, bleu4")

@@ -138,10 +138,11 @@ def compute_metrics_for_crosscompare(eval_pred: EvalPrediction) -> Dict[str, flo
     batch_size, n_candidates, n_tasks = scores.shape
     # get the predicted best index
     if logits.shape[1] == 3:
+        # bubble
         pred_best_idx = logits[:, 2, -1]
     elif logits.shape == (batch_size, n_candidates, n_candidates):
-        b_logits = logits > 0
-        pred_best_idx = np.argmax(np.sum(b_logits, axis=-1), axis=-1)
+        # full
+        pred_best_idx = np.argmax(np.mean(logits, axis=2) - np.mean(logits, axis=1), axis=-1)
     else:
         raise ValueError("Invalid logits shape: {}".format(logits.shape))
 

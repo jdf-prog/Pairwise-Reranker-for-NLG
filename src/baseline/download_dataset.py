@@ -29,7 +29,7 @@ parser.add_argument('--dataset', type=str, default = "cnndm",
                     choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
 
 parser.add_argument('--max_size', type = int, default = 1000000)
-parser.add_argument('--shuffle_train', action='store_true')
+parser.add_argument('--shuffle', action='store_true')
 parser.add_argument('--agg_target', action='store_true')
 
 args = parser.parse_args()
@@ -101,7 +101,7 @@ def main(args):
         set_names = ["train", "val", "test"]
         idx = 0
         for set_name in set_names:
-            save_raw_dataset(args.dataset, set_name, set_sources[idx], set_target[idx], args.shuffle_train and set_name=="train")
+            save_raw_dataset(args.dataset, set_name, set_sources[idx], set_target[idx], args.shuffle)
             idx += 1
     else:
         for x in sets:

@@ -35,9 +35,9 @@ def main(args):
 
     if args.do_train:
         if '1_half' in args.model_name:
-            ids, sources, targets = load_raw_dataset(args.dataset, 'train', '1_half')
+            ids, sources, targets = load_raw_dataset(args.dataset, 'train', '1_half', load_shuffle=True)
         elif '2_half' in args.model_name:
-            ids, sources, targets = load_raw_dataset(args.dataset, 'train', '2_half')
+            ids, sources, targets = load_raw_dataset(args.dataset, 'train', '2_half', load_shuffle=True)
         else:
             ids, sources, targets = load_raw_dataset(args.dataset, 'train', 'full')
         train_dataset = Dataset(sources, targets, max_size=args.max_train_data_size)
@@ -344,13 +344,13 @@ if __name__ == '__main__':
     # default config
     dataset_names = ["cnndm", "xsum", "reddit", 'wmt18', 'commongen']
     prefix = [None, None, None, "Translate Chinese to English: ", "Generate a sentence with the following words: "]
-    metrics = ["rouge1+rouge2+rougeLsum", "rouge1+rouge2+rougeLsum", "rouge1+rouge2+rougeLsum", "bleu", "cider+bleu"]
+    metrics = ["rouge1,rouge2,rougeLsum", "rouge1,rouge2,rougeLsum", "rouge1,rouge2,rougeLsum", "bleu", "cider,bleu"]
     # setting default values
     idx = dataset_names.index(args.dataset)
     args.prefix = prefix[idx] if args.prefix is None and 't5' in args.model_type else args.prefix
     args.generation_max_length = args.target_max_length if args.generation_max_length is None else args.generation_max_length
     args.metrics = metrics[idx] if args.metrics is None else args.metrics
-    args.metrics = args.metrics.split('+')
+    args.metrics = args.metrics.split(',')
     args.metric_for_best_model = args.metrics[0] if args.metric_for_best_model is None else args.metric_for_best_model
     assert args.metric_for_best_model in args.metrics, f"{args.metric_for_best_model} not in {args.metrics}"
     args.cache_dir = "../../hf_models/" + args.model + "/"

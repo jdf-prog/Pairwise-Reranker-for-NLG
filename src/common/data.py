@@ -11,7 +11,7 @@ from common.dataset import CustomDataset
 
 
 
-def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=False, load_shuffle=True):
+def load_raw_dataset(dataset_name, set_name, partition=None, return_offsets=False, load_shuffle=False):
     """
         Load from the specified dataset. Note that the data path is hard-coded here!
     Args:

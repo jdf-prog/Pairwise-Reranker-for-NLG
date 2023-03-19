@@ -270,8 +270,8 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=None)
     parser.add_argument("--loss_type", type=str, choices=[
       "BCE", "infoNCE", "ListNet", "ListMLE", "p_ListMLE",
-      "triplet", "triplet_v2", "triplet_simcls", "MoE_BCE", "MSE", "ApproxNDCG",
-      "ranknet", "MoE_ranknet", "lambdarank", "source_target", "joint", "simcls",
+      "triplet", "triplet_v2", "MoE_BCE", "MSE", "ApproxNDCG",
+      "ranknet", "MoE_ranknet", "lambdarank", "simcls",
 
     ], default="BCE")
     parser.add_argument("--pooling_type", type=str, choices=[
@@ -293,12 +293,12 @@ if __name__ == "__main__":
     parser.add_argument("--sub_sampling_mode", type=str, choices=[
         "uniform", "top_bottom", "top_random", "random_bottom",
         "importance", "random", "poisson_dynamic", "top_bottom_random",
-        "top_uniform", "radius", "rank_based", "1_top_bottom"
+        "top_uniform", "rank_based", "1_top_bottom", "none"
     ], default="top_bottom")
     parser.add_argument("--max_train_data_size", type=int, default=-1)
     parser.add_argument("--max_eval_data_size", type=int, default=-1)
     parser.add_argument("--max_predict_data_size", type=int, default=-1)
-    parser.add_argument("--using_metrics", type=str, default="rouge1+rouge2+rougeLsum")
+    parser.add_argument("--using_metrics", type=str, default="rouge1,rouge2,rougeLsum")
 
     # running config
     parser.add_argument("--seed", type=int, default=42)
@@ -388,10 +388,10 @@ if __name__ == "__main__":
         args.output_dir = f"outputs/{args.reranker_type}/{args.model_name}/{args.run_name}"
     args.cache_dir = "./hf_models/" + args.model_name.split('/')[-1] + "/"
     args.label_names = ["scores"]
-    args.candidate_generation_methods = args.candidate_generation_method.split('+')
-    args.candidate_models = args.candidate_model.split('+')
+    args.candidate_generation_methods = args.candidate_generation_method.split(',')
+    args.candidate_models = args.candidate_model.split(',')
     args.local_rank = os.environ.get("LOCAL_RANK", args.local_rank)
-    args.metrics = args.using_metrics.split('+')
+    args.metrics = args.using_metrics.split(',')
 
     # prepare for curriculum learning
     if args.curriculum_learning:
