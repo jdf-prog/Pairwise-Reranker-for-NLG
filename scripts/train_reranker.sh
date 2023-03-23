@@ -1,24 +1,23 @@
 #!/bin/bash
-#SBATCH --time=18:00:00
+#SBATCH --time=48:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:1
-#SBATCH --nodelist=ink-gary
+#SBATCH --gres=gpu:6000:1
 
 nvidia-smi
 cd ../
 
 localhost=$RANDOM
-dataset="commongen"
+dataset="cnndm"
 backbone_type="roberta" # "deberta" or "roberta"
 backbone_name="roberta-large" # "microsoft/deberta-v3-large" or "roberta-large"
-n_gpu=1
-reranker="SimCLS" # "PairReranker" or "SummaReranker" or "SimCLS"
-candidate_model="t5_commongen_half,t5_common_gen"
+n_gpu=2
+reranker="SummaReranker" # "PairReranker" or "SummaReranker" or "SimCLS"
+candidate_model="pegasus_cnndm,pegasus_cnndm_half"
 candidate_generation_method="beam_search,diverse_beam_search"
 n_candidates=30
 learning_rate=1e-5
-num_train_epochs=5
+num_train_epochs=5 
 max_train_data_size=-1 # -1 means no limit
 max_eval_data_size=-1 # -1 means no limit
 max_predict_data_size=-1 # -1 means no limit
@@ -27,6 +26,7 @@ do_inference=False # whether do inference instead of training, i.e. do test
 # to do inference on a dataset, you can set the checkpoint_trained_dataset to the dataset
 # by default, it is set to the dataset you are doing inference on
 checkpoint_trained_dataset=${dataset}
+run_name_postfix="" # add a postfix to the run_name
 
 train_data_path="./data/prepared/${dataset}/train/dataset.jsonl"
 dev_data_path="./data/prepared/${dataset}/val/dataset.jsonl"
@@ -37,8 +37,8 @@ if [[ $dataset =~ "cnndm" ]]; then
     source_maxlength=256
     candidate_maxlength=128
     per_device_train_batch_size=4
-    per_device_eval_batch_size=16
-    gradient_accumulation_steps=16
+    per_device_eval_batch_size=8
+    gradient_accumulation_steps=8
     using_metrics="rouge1,rouge2,rougeLsum"
     # checkpoint_trained_dataset="trian_cnndm_BCE_single_linear" # for personal history reason
 
@@ -57,7 +57,7 @@ elif [[ $dataset =~ "wmt18" ]]; then
     source_maxlength=112
     candidate_maxlength=200
     per_device_train_batch_size=4
-    per_device_eval_batch_size=16
+    per_device_eval_batch_size=8
     gradient_accumulation_steps=16
     using_metrics="bleu"
 
@@ -101,6 +101,8 @@ if [[ $reranker = "PairReranker" ]]; then
         load_checkpoint="" # no need to load checkpoint for training
     fi
 
+    run_name="${run_name}${run_name_postfix}"
+
     torchrun \
         --rdzv_backend=c10d \
         --rdzv_endpoint="localhost:${localhost}" \
@@ -136,7 +138,7 @@ if [[ $reranker = "PairReranker" ]]; then
         --num_pos 1 \
         --num_neg 1 \
         --loss_type "BCE" \
-        --sub_sampling_mode "top_bottom" \
+        --sub_sampling_mode "random" \
         --reduce_type  "linear" \
         --pooling_type "special" \
         --overwrite_output_dir True \
@@ -157,6 +159,9 @@ elif [[ $reranker = "SummaReranker" ]]; then
         do_test="True"
         load_checkpoint="" # no need to load checkpoint for training
     fi
+
+    run_name="${run_name}${run_name_postfix}"
+
     torchrun \
         --rdzv_backend=c10d \
         --rdzv_endpoint="localhost:${localhost}" \
@@ -210,6 +215,9 @@ elif [[ $reranker = "SimCLS" ]]; then
         do_test="True"
         load_checkpoint="" # no need to load checkpoint for training
     fi
+
+    run_name="${run_name}${run_name_postfix}"
+
     torchrun \
         --rdzv_backend=c10d \
         --rdzv_endpoint="localhost:${localhost}" \
@@ -242,7 +250,8 @@ elif [[ $reranker = "SimCLS" ]]; then
         --max_eval_data_size ${max_eval_data_size} \
         --max_predict_data_size ${max_predict_data_size} \
         --loss_type "simcls" \
-        --sub_sampling_mode "none" \
+        --sub_sampling_mode "uniform" \
+        --sub_sampling_ratio 0.3 \
         --overwrite_output_dir True \
 
 else

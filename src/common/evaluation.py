@@ -58,7 +58,7 @@ def eval_rouge(
     """
     assert len(hypotheses) == len(references)
     assert set(rouge_types) <= set(['rouge1', 'rouge2', 'rougeL', 'rougeLsum']), "Rouge types should be in ['rouge1', 'rouge2', 'rougeL', 'rougeLsum']"
-    scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=True)
+    scorer = rouge_scorer.RougeScorer(rouge_types, use_stemmer=True, split_summaries=True)
     rouge_scores = {rouge_type: [[] for _ in range(len(hypotheses))] for rouge_type in rouge_types}
     with tqdm(total=len(hypotheses), desc="Evaluating rouge") as pbar:
         for i, (hypo_group, ref) in enumerate(zip(hypotheses, references)):

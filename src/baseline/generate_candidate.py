@@ -44,7 +44,7 @@ parser.add_argument('--debug_size', type = int, default = 10)
 
 # data
 parser.add_argument('--dataset', type=str, default = "cnndm",
-                    choices= ["cnndm", "xsum", "reddit", 'wmt18', 'commongen'])
+                    help="cnndm, xsum, reddit, wmt18, commongen")
 parser.add_argument('--load_shuffle', type = str2bool, default = False)
 
 # model
@@ -114,7 +114,7 @@ prefix = [None, None, None, "Translate Chinese to English: ", "Generate a senten
 
 idx = 0
 for i in range(len(dataset_names)):
-    if dataset_names[i] in args.model_name:
+    if dataset_names[i] in args.dataset:
         idx = i
         break
 

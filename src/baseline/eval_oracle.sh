@@ -1,29 +1,30 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
+#SBATCH --time=10:00:00
 #SBATCH --job-name=eval_oracle
 #SBATCH --output ../../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
 
-python eval_oracle.py \
-    --dataset cnndm_bart \
-    --set val \
-    --metrics "rouge" \
-    --num_workers 1 \
-    --save_prepared True \
+# python eval_oracle.py \
+#     --dataset cnndm_bart \
+#     --set val \
+#     --metrics "rouge" \
+#     --num_workers 1 \
+#     --save_prepared True \
 
 # python eval_oracle.py \
-#     --dataset wmt18 \
-#     --set train \
+#     --dataset wmt18_chatgpt_min \
+#     --set test \
 #     --metrics "bleu" \
 #     --num_workers 1 \
 #     --save_prepared True \
 
-# do not save train prepared file, not consistent with raw dataset
+# # do not save train prepared file, not consistent with raw dataset
 # python eval_oracle.py \
-#     --dataset commongen \
+#     --dataset commongen_agg \
 #     --set train \
-#     --metrics "bleu,bleu4,cider,spice" \
+#     --metrics "bleu,cider" \
 #     --num_workers 1 \
+#     --save_prepared True \
 
 
 # FOR: GPT3 transfer
@@ -50,15 +51,16 @@ python eval_oracle.py \
 
 # # FOR: chatgpt
 
-# for set in train val test; do
-#     python eval_oracle.py \
-#         --dataset cnndm_chatgpt \
-#         --set $set \
-#         --metrics "rouge" \
-#         --num_workers 1 \
-#         --save_prepared True \
+for set in train val test; do
+    python eval_oracle.py \
+        --dataset cnndm_chatgpt_min \
+        --set $set \
+        --metrics "rouge" \
+        --num_workers 1 \
+        --save_prepared True \
+        --overwrite True \
 
-# done
+done
 
 # for set in train val test; do
 #     python eval_oracle.py \

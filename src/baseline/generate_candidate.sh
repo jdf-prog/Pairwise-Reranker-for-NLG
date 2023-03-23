@@ -14,26 +14,26 @@ nvidia-smi
 # cnndm
 ######################################################
 
-# for set in "test"
-# do
-#     for method in "beam_search" "diverse_beam_search"
-#     do
-#         python generate_candidate.py \
-#         --dataset cnndm \
-#         --model_type bart \
-#         --model facebook/bart-large-cnn \
-#         --model_name bart_cnndm \
-#         --load_model False \
-#         --set ${set} \
-#         --inference_bs 2 \
-#         --save_candidates True \
-#         --generation_method ${method} \
-#         --num_return_sequences 15 \
-#         --num_beams 15 \
-#         --num_beam_groups 15 \
+for set in "test"
+do
+    for method in "beam_search" "diverse_beam_search"
+    do
+        python generate_candidate.py \
+        --dataset cnndm_bart \
+        --model_type bart \
+        --model facebook/bart-large-cnn \
+        --model_name bart_cnndm \
+        --load_model False \
+        --set ${set} \
+        --inference_bs 2 \
+        --save_candidates True \
+        --generation_method ${method} \
+        --num_return_sequences 15 \
+        --num_beams 15 \
+        --num_beam_groups 15 \
 
-#     done
-# done
+    done
+done
 
 ######################################################
 # xsum
@@ -87,28 +87,28 @@ nvidia-smi
 # commongen
 ######################################################
 
-# commongen
-for set in "val"
-do
-    for method in "diverse_beam_search" "beam_search"
-    do
-        python generate_candidate.py \
-        --dataset commongen_flan \
-        --model_type flan-t5 \
-        --model google/flan-t5-large \
-        --model_name flan_t5 \
-        --load_model False \
-        --set ${set} \
-        --inference_bs 10 \
-        --save_candidates True \
-        --generation_method ${method} \
-        --num_return_sequences 15 \
-        --num_beams 15 \
-        --num_beam_groups 15 \
-        # --load_model_path "../../models/t5_common_gen/checkpoint-best" \
+# # commongen
+# for set in "val"
+# do
+#     for method in "diverse_beam_search" "beam_search"
+#     do
+#         python generate_candidate.py \
+#         --dataset commongen_flan \
+#         --model_type flan-t5 \
+#         --model google/flan-t5-large \
+#         --model_name flan_t5 \
+#         --load_model False \
+#         --set ${set} \
+#         --inference_bs 10 \
+#         --save_candidates True \
+#         --generation_method ${method} \
+#         --num_return_sequences 15 \
+#         --num_beams 15 \
+#         --num_beam_groups 15 \
+#         # --load_model_path "../../models/t5_common_gen/checkpoint-best" \
 
-    done
-done
+#     done
+# done
 
 #######################################################
 # Generate candidates using our half-fine-tuned models

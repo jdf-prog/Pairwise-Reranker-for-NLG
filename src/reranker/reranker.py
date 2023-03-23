@@ -422,8 +422,8 @@ class CrossCompareReranker(nn.Module):
     def compute_loss(self, left_pred_scores, right_pred_scores, left_scores, right_scores):
         """
         Args:
-            left_pred_scores: [n_candidates, hidden_size]
-            right_pred_scores: [n_candidates, hidden_size]
+            left_pred_scores: [n_candidates, n_task]
+            right_pred_scores: [n_candidates, n_task]
             left_scores: [n_candidates, n_task]
             right_scores: [n_candidates, n_task]
         """
