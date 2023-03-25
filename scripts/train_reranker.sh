@@ -1,32 +1,32 @@
 #!/bin/bash
-#SBATCH --time=48:00:00
+#SBATCH --time=10:00:00
 #SBATCH --job-name=train_reranker
 #SBATCH --output ../jobs/%j.out
-#SBATCH --gres=gpu:6000:1
+#SBATCH --gres=gpu:2080:1
 
 nvidia-smi
 cd ../
 
 localhost=$RANDOM
-dataset="cnndm"
-backbone_type="roberta" # "deberta" or "roberta"
-backbone_name="roberta-large" # "microsoft/deberta-v3-large" or "roberta-large"
-n_gpu=2
-reranker="SummaReranker" # "PairReranker" or "SummaReranker" or "SimCLS"
-candidate_model="pegasus_cnndm,pegasus_cnndm_half"
-candidate_generation_method="beam_search,diverse_beam_search"
-n_candidates=30
+dataset="cnndm_chatgpt_min"
+backbone_type="deberta" # "deberta" or "roberta"
+backbone_name="microsoft/deberta-v3-large" # "microsoft/deberta-v3-large" or "roberta-large"
+n_gpu=1
+reranker="PairReranker" # "PairReranker" or "SummaReranker" or "SimCLS"
+candidate_model="chatgpt"
+candidate_generation_method="top_p_sampling"
+n_candidates=10
 learning_rate=1e-5
 num_train_epochs=5 
 max_train_data_size=-1 # -1 means no limit
 max_eval_data_size=-1 # -1 means no limit
 max_predict_data_size=-1 # -1 means no limit
-do_inference=False # whether do inference instead of training, i.e. do test
+do_inference=True # whether do inference instead of training, i.e. do test
 # for inference, sometimes you want to use a checkpoint trained on another dataset
 # to do inference on a dataset, you can set the checkpoint_trained_dataset to the dataset
 # by default, it is set to the dataset you are doing inference on
-checkpoint_trained_dataset=${dataset}
-run_name_postfix="" # add a postfix to the run_name
+checkpoint_trained_dataset="cnndm_chatgpt"
+run_name_postfix="k=1" # add a postfix to the run_name
 
 train_data_path="./data/prepared/${dataset}/train/dataset.jsonl"
 dev_data_path="./data/prepared/${dataset}/val/dataset.jsonl"
@@ -36,9 +36,9 @@ if [[ $dataset =~ "cnndm" ]]; then
     echo "Using cnndm"
     source_maxlength=256
     candidate_maxlength=128
-    per_device_train_batch_size=4
+    per_device_train_batch_size=2
     per_device_eval_batch_size=8
-    gradient_accumulation_steps=8
+    gradient_accumulation_steps=32
     using_metrics="rouge1,rouge2,rougeLsum"
     # checkpoint_trained_dataset="trian_cnndm_BCE_single_linear" # for personal history reason
 
@@ -48,7 +48,7 @@ elif [[ $dataset =~ "commongen" ]]; then
     source_maxlength=25
     candidate_maxlength=35
     per_device_train_batch_size=4
-    per_device_eval_batch_size=32
+    per_device_eval_batch_size=8
     gradient_accumulation_steps=16
     using_metrics="bleu,cider"
 
@@ -135,10 +135,10 @@ if [[ $reranker = "PairReranker" ]]; then
         --max_train_data_size ${max_train_data_size} \
         --max_eval_data_size ${max_eval_data_size} \
         --max_predict_data_size ${max_predict_data_size} \
-        --num_pos 1 \
-        --num_neg 1 \
+        --num_pos 4 \
+        --num_neg 4 \
         --loss_type "BCE" \
-        --sub_sampling_mode "random" \
+        --sub_sampling_mode "top_bottom" \
         --reduce_type  "linear" \
         --pooling_type "special" \
         --overwrite_output_dir True \

@@ -4,12 +4,12 @@
 #SBATCH --output ../../jobs/%j.out
 #SBATCH --nodelist=ink-ellie
 
-# python eval_oracle.py \
-#     --dataset cnndm_bart \
-#     --set val \
-#     --metrics "rouge" \
-#     --num_workers 1 \
-#     --save_prepared True \
+python eval_oracle.py \
+    --dataset cnndm_bart \
+    --set test \
+    --metrics "rouge" \
+    --num_workers 1 \
+    --save_prepared True \
 
 # python eval_oracle.py \
 #     --dataset wmt18_chatgpt_min \
@@ -51,16 +51,16 @@
 
 # # FOR: chatgpt
 
-for set in train val test; do
-    python eval_oracle.py \
-        --dataset cnndm_chatgpt_min \
-        --set $set \
-        --metrics "rouge" \
-        --num_workers 1 \
-        --save_prepared True \
-        --overwrite True \
+# for set in train val test; do
+#     python eval_oracle.py \
+#         --dataset cnndm_chatgpt_min \
+#         --set $set \
+#         --metrics "rouge" \
+#         --num_workers 1 \
+#         --save_prepared True \
+#         --overwrite True \
 
-done
+# done
 
 # for set in train val test; do
 #     python eval_oracle.py \
